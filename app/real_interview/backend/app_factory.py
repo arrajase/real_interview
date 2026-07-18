@@ -14,6 +14,10 @@ from app.real_interview.backend.routes import (
     resume_blueprint,
     user_maintenance_blueprint,
 )
+from app.trap_drills.backend.routes import (
+    trap_drills_api_blueprint,
+    trap_drills_pages_blueprint,
+)
 
 _FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
@@ -44,6 +48,10 @@ def create_app() -> Flask:
 
     logger.info("[app_factory] registering feedback blueprint")
     app.register_blueprint(feedback_blueprint)
+
+    logger.info("[app_factory] registering trap_drills blueprints")
+    app.register_blueprint(trap_drills_api_blueprint)
+    app.register_blueprint(trap_drills_pages_blueprint)
 
     @app.route("/", methods=["GET"])
     def serve_ui_index():

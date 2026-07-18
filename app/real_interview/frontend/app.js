@@ -192,6 +192,8 @@
     if (chatDisplay) chatDisplay.textContent = value;
     var avatarDisplay = $("display-user-email-avatar");
     if (avatarDisplay) avatarDisplay.textContent = value;
+    var pickerDisplay = $("display-user-email-picker");
+    if (pickerDisplay) pickerDisplay.textContent = value;
   }
 
   function formatInterviewerMessageContent(content, panelPlan) {
@@ -563,6 +565,7 @@
 
   function showInterviewChatView(email, sessionId) {
     hideView("view-auth");
+    hideView("view-app-picker");
     hideView("view-profile");
     hideView("view-upload");
     hideView("view-job-application");
@@ -578,6 +581,7 @@
   }
 
   function showAuthView() {
+    hideView("view-app-picker");
     hideView("view-profile");
     hideView("view-upload");
     hideView("view-job-application");
@@ -676,6 +680,7 @@
 
   function showAvatarDiscussView(email) {
     hideView("view-auth");
+    hideView("view-app-picker");
     hideView("view-profile");
     hideView("view-upload");
     hideView("view-job-application");
@@ -725,6 +730,7 @@
 
   function showProfileView(email) {
     hideView("view-auth");
+    hideView("view-app-picker");
     hideView("view-upload");
     hideView("view-job-application");
     hideView("view-interview-chat");
@@ -735,8 +741,24 @@
     loadProfileData();
   }
 
+  // Resume-gated app picker (v2 §2): shown instead of the profile page once a
+  // user has at least one resume uploaded. Brand-new users with zero resumes
+  // never see this — they land on view-profile exactly as before, since that
+  // page already has the resume-upload step they need first.
+  function showAppPickerView(email) {
+    hideView("view-auth");
+    hideView("view-profile");
+    hideView("view-upload");
+    hideView("view-job-application");
+    hideView("view-interview-chat");
+    hideView("view-avatar-discuss");
+    showView("view-app-picker");
+    setSignedInEmail(email);
+  }
+
   function showUploadView(email) {
     hideView("view-auth");
+    hideView("view-app-picker");
     hideView("view-profile");
     hideView("view-job-application");
     hideView("view-interview-chat");
@@ -751,6 +773,7 @@
 
   function showJobApplicationView(email) {
     hideView("view-auth");
+    hideView("view-app-picker");
     hideView("view-profile");
     hideView("view-upload");
     hideView("view-interview-chat");
@@ -1165,7 +1188,45 @@
   }
 
   function afterAuthSuccess(email) {
-    showProfileView(email);
+    // Resume-gated landing (v2 §2): no resume yet -> unchanged profile-page
+    // onboarding; resume already exists -> App Picker instead.
+    apiGet("/api/resumes").then(function (r) {
+      if (r.ok && (r.data.resumes || []).length > 0) {
+        showAppPickerView(email);
+      } else {
+        showProfileView(email);
+      }
+    });
+  }
+
+  function wireAppPicker() {
+    var realInterviewTile = $("tile-real-interview");
+    if (realInterviewTile) {
+      realInterviewTile.addEventListener("click", function () {
+        showProfileView(getStoredUserEmail());
+      });
+    }
+
+    var trapDrillsTile = $("tile-trap-drills");
+    if (trapDrillsTile) {
+      trapDrillsTile.addEventListener("click", function () {
+        window.location.href = "/trapdrills/";
+      });
+    }
+
+    var updateProfileLink = $("link-app-picker-update-profile");
+    if (updateProfileLink) {
+      updateProfileLink.addEventListener("click", function () {
+        showProfileView(getStoredUserEmail());
+      });
+    }
+
+    var switchAppBtn = $("btn-switch-app-profile");
+    if (switchAppBtn) {
+      switchAppBtn.addEventListener("click", function () {
+        showAppPickerView(getStoredUserEmail());
+      });
+    }
   }
 
   function wireContinuePausedInterview() {
@@ -1562,29 +1623,42 @@
         var btn = ev.target.querySelector('button[type="submit"]');
         btn.disabled = true;
 
-        fetch("/api/resumes", {
-          method: "POST",
-          credentials: fetchCredentials(),
-          headers: authHeaders(),
-          body: fd,
-        })
-          .then(function (res) {
-            return res.json().then(function (data) {
-              return { ok: res.ok, status: res.status, data: data };
-            });
-          })
-          .then(function (r) {
-            if (r.status === 401) {
-              handleUnauthorized();
-              return;
-            }
-            if (r.ok) {
-              ev.target.reset();
-              setMessage(msg, r.data.message || "Resume uploaded.", "ok");
-              loadProfileResumes();
-            } else {
-              setMessage(msg, r.data.error || "Upload failed.", "error");
-            }
+        // Capture "had zero resumes before this upload" so a first-ever
+        // successful upload can redirect to the App Picker (v2 §2) instead
+        // of just refreshing the profile's resume list.
+        apiGet("/api/resumes")
+          .then(function (priorResult) {
+            var hadNoResumesBefore =
+              priorResult.ok && (priorResult.data.resumes || []).length === 0;
+
+            return fetch("/api/resumes", {
+              method: "POST",
+              credentials: fetchCredentials(),
+              headers: authHeaders(),
+              body: fd,
+            })
+              .then(function (res) {
+                return res.json().then(function (data) {
+                  return { ok: res.ok, status: res.status, data: data };
+                });
+              })
+              .then(function (r) {
+                if (r.status === 401) {
+                  handleUnauthorized();
+                  return;
+                }
+                if (r.ok) {
+                  ev.target.reset();
+                  setMessage(msg, r.data.message || "Resume uploaded.", "ok");
+                  if (hadNoResumesBefore) {
+                    showAppPickerView(getStoredUserEmail());
+                  } else {
+                    loadProfileResumes();
+                  }
+                } else {
+                  setMessage(msg, r.data.error || "Upload failed.", "error");
+                }
+              });
           })
           .catch(function () {
             setMessage(msg, "Network error. Try again.", "error");
@@ -2233,6 +2307,8 @@
     $("btn-sign-out").addEventListener("click", signOut);
     var profileBtn = $("btn-sign-out-profile");
     if (profileBtn) profileBtn.addEventListener("click", signOut);
+    var pickerBtn = $("btn-sign-out-picker");
+    if (pickerBtn) pickerBtn.addEventListener("click", signOut);
     var jobBtn = $("btn-sign-out-job");
     if (jobBtn) jobBtn.addEventListener("click", signOut);
     var chatBtn = $("btn-sign-out-chat");
@@ -2258,6 +2334,7 @@
     wireInterviewChat();
     wireContinuePausedInterview();
     wireSignOut();
+    wireAppPicker();
 
     restoreSessionFromServer().then(function (ok) {
       if (!ok) {

@@ -119,10 +119,36 @@
         <p id="auth-message" class="message" role="status" aria-live="polite"></p>
       </section>
 
+      <section id="view-app-picker" class="card is-hidden" aria-labelledby="app-picker-heading" hidden>
+        <h2 id="app-picker-heading">Choose an app</h2>
+        <p class="signed-in">
+          Signed in as <code id="display-user-email-picker"></code>
+          <button type="button" id="btn-sign-out-picker" class="btn link">Sign out</button>
+        </p>
+        <div class="app-picker-tiles">
+          <button type="button" id="tile-real-interview" class="app-picker-tile">
+            <span class="app-picker-tile-title">Real Interview</span>
+            <span class="app-picker-tile-desc">
+              Mock interviews, resumes, reports, and Discuss with Avatar.
+            </span>
+          </button>
+          <button type="button" id="tile-trap-drills" class="app-picker-tile">
+            <span class="app-picker-tile-title">Interview Trap Drills</span>
+            <span class="app-picker-tile-desc">
+              Spaced-repetition drills for role-specific "trick" interview questions.
+            </span>
+          </button>
+        </div>
+        <p class="app-picker-update-link">
+          <button type="button" id="link-app-picker-update-profile" class="btn link">Update profile</button>
+        </p>
+      </section>
+
       <section id="view-profile" class="card is-hidden" aria-labelledby="profile-heading" hidden>
         <h2 id="profile-heading">Your profile</h2>
         <p class="signed-in">
           Signed in as <code id="display-user-email-profile"></code>
+          <button type="button" id="btn-switch-app-profile" class="btn link">Switch app</button>
           <button type="button" id="btn-sign-out-profile" class="btn link">Sign out</button>
         </p>
 

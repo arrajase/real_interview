@@ -723,6 +723,49 @@ label.confirm-delete input {
   color: var(--accent);
 }
 
+.app-picker-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.85rem;
+  margin: 1rem 0 1.25rem;
+}
+
+.app-picker-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.app-picker-tile:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.app-picker-tile-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.app-picker-tile-desc {
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.app-picker-update-link {
+  margin: 0;
+}
+
 .profile-stat-label {
   font-size: 0.88rem;
   color: var(--muted);
