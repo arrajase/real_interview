@@ -9,12 +9,208 @@
   <body>
     <header class="site-header">
       <h1>Interview Trap Drills</h1>
-      <p class="tagline">Scaffold placeholder — real UI lands in Module 5.</p>
+      <p class="tagline">Spaced-repetition drills for role-specific "trick" interview questions.</p>
     </header>
+
     <main class="layout">
-      <section class="card">
-        <p>This page will become Today's Review, the Category Dashboard, Add/Edit Question, and History.</p>
+      <section class="card" id="role-banner" aria-label="Current role">
+        <div class="role-banner-row">
+          <p class="role-banner-info">
+            <span class="role-banner-label">Role:</span>
+            <span id="role-banner-current">—</span>
+          </p>
+          <div class="role-banner-controls">
+            <label class="sr-only" for="role-banner-select">Switch role</label>
+            <select id="role-banner-select"></select>
+            <button type="button" id="btn-switch-app-trapdrills" class="btn link">Switch app</button>
+            <button type="button" id="btn-sign-out-trapdrills" class="btn link">Sign out</button>
+          </div>
+        </div>
       </section>
+
+      <nav class="tabs trap-drills-nav" role="tablist" aria-label="Trap Drills sections">
+        <button type="button" class="tab is-active" data-td-tab="review" role="tab" aria-selected="true">
+          Today's Review
+        </button>
+        <button type="button" class="tab" data-td-tab="dashboard" role="tab" aria-selected="false">
+          Category Dashboard
+        </button>
+        <button type="button" class="tab" data-td-tab="manage" role="tab" aria-selected="false">
+          Manage Questions
+        </button>
+        <button type="button" class="tab" data-td-tab="history" role="tab" aria-selected="false">
+          History
+        </button>
+      </nav>
+
+      <section id="td-panel-review" class="card" role="tabpanel">
+        <h2>Today's Review</h2>
+
+        <div id="role-picker-prompt" class="role-picker-prompt is-hidden" hidden>
+          <p class="hint">
+            We couldn't detect a role from your job application. Pick one to start drilling.
+          </p>
+        </div>
+
+        <div id="review-session">
+          <p id="review-progress" class="hint"></p>
+
+          <div id="review-question-card" class="is-hidden" hidden>
+            <p class="review-category" id="review-category"></p>
+            <p class="review-prompt" id="review-prompt"></p>
+
+            <label class="stack" for="review-answer-input">
+              Your answer (optional notes — not graded automatically)
+              <textarea id="review-answer-input" rows="3"></textarea>
+            </label>
+
+            <div class="review-actions" id="review-self-assess">
+              <button type="button" id="btn-review-correct" class="btn primary">I got it right</button>
+              <button type="button" id="btn-review-incorrect" class="btn secondary">I got it wrong</button>
+            </div>
+
+            <div id="review-reveal" class="review-reveal is-hidden" hidden>
+              <p><strong>Trap answer:</strong> <span id="reveal-trap"></span></p>
+              <p><strong>Correct answer:</strong> <span id="reveal-correct"></span></p>
+              <p><strong>Explanation:</strong> <span id="reveal-explanation"></span></p>
+              <div class="review-reveal-actions">
+                <button type="button" id="btn-report-question" class="btn link is-hidden" hidden>
+                  Report this question
+                </button>
+                <button type="button" id="btn-review-next" class="btn primary">Next</button>
+              </div>
+            </div>
+          </div>
+
+          <p id="review-empty-state" class="hint is-hidden" hidden>
+            Nothing due right now — nice work! Check back tomorrow.
+          </p>
+        </div>
+      </section>
+
+      <section id="td-panel-dashboard" class="card is-hidden" role="tabpanel" hidden>
+        <h2>Category Dashboard</h2>
+        <p class="hint">Categories with low accuracy or nothing mastered yet are flagged "Needs work".</p>
+        <table id="dashboard-table" class="data-table is-hidden" hidden>
+          <thead>
+            <tr>
+              <th scope="col">Category</th>
+              <th scope="col">Total questions</th>
+              <th scope="col">Attempted</th>
+              <th scope="col">Mastered</th>
+              <th scope="col">Accuracy</th>
+              <th scope="col"></th>
+            </tr>
+          </thead>
+          <tbody id="dashboard-table-body"></tbody>
+        </table>
+        <p id="dashboard-empty-state" class="hint is-hidden" hidden>
+          No questions in the bank for this role yet.
+        </p>
+      </section>
+
+      <section id="td-panel-manage" class="card is-hidden" role="tabpanel" hidden>
+        <h2>Manage Questions</h2>
+
+        <form id="form-question" class="stack" novalidate>
+          <input type="hidden" id="question-form-id" value="" />
+          <p id="question-form-mode" class="hint">Add a new question</p>
+          <label>
+            Role
+            <select id="question-form-role" name="role" required></select>
+          </label>
+          <label>
+            Category
+            <input type="text" id="question-form-category" name="category" list="question-form-category-options" required />
+            <datalist id="question-form-category-options"></datalist>
+          </label>
+          <label>
+            Prompt
+            <textarea id="question-form-prompt" name="prompt" rows="2" required></textarea>
+          </label>
+          <label>
+            Trap answer
+            <textarea id="question-form-trap-answer" name="trap_answer" rows="2" required></textarea>
+          </label>
+          <label>
+            Correct answer
+            <textarea id="question-form-correct-answer" name="correct_answer" rows="2" required></textarea>
+          </label>
+          <label>
+            Explanation
+            <textarea id="question-form-explanation" name="explanation" rows="2" required></textarea>
+          </label>
+          <div class="review-actions">
+            <button type="submit" class="btn primary" id="btn-question-form-submit">Add question</button>
+            <button type="button" class="btn secondary is-hidden" id="btn-question-form-cancel" hidden>Cancel edit</button>
+          </div>
+        </form>
+        <p id="question-form-message" class="message" role="status" aria-live="polite"></p>
+
+        <h3>Existing questions</h3>
+        <label>
+          Filter by role
+          <select id="question-list-role-filter"></select>
+        </label>
+        <table id="question-list-table" class="data-table is-hidden" hidden>
+          <thead>
+            <tr>
+              <th scope="col">Category</th>
+              <th scope="col">Prompt</th>
+              <th scope="col">Status</th>
+              <th scope="col"></th>
+            </tr>
+          </thead>
+          <tbody id="question-list-table-body"></tbody>
+        </table>
+        <p id="question-list-empty-state" class="hint is-hidden" hidden>No questions for this role yet.</p>
+
+        <h3>Pending review</h3>
+        <table id="pending-review-table" class="data-table is-hidden" hidden>
+          <thead>
+            <tr>
+              <th scope="col">Role</th>
+              <th scope="col">Category</th>
+              <th scope="col">Prompt</th>
+              <th scope="col"></th>
+            </tr>
+          </thead>
+          <tbody id="pending-review-table-body"></tbody>
+        </table>
+        <p id="pending-review-empty-state" class="hint is-hidden" hidden>Nothing pending review.</p>
+      </section>
+
+      <section id="td-panel-history" class="card is-hidden" role="tabpanel" hidden>
+        <h2>History</h2>
+        <label>
+          Filter by role
+          <select id="history-role-filter">
+            <option value="">All roles</option>
+          </select>
+        </label>
+        <table id="history-table" class="data-table is-hidden" hidden>
+          <thead>
+            <tr>
+              <th scope="col">Question</th>
+              <th scope="col">Role</th>
+              <th scope="col">Result</th>
+              <th scope="col">Box after</th>
+              <th scope="col">Answered</th>
+            </tr>
+          </thead>
+          <tbody id="history-table-body"></tbody>
+        </table>
+        <p id="history-empty-state" class="hint is-hidden" hidden>No attempts yet.</p>
+        <div class="review-actions" id="history-pagination">
+          <button type="button" id="btn-history-prev" class="btn secondary" disabled>Previous</button>
+          <span id="history-page-indicator" class="hint"></span>
+          <button type="button" id="btn-history-next" class="btn secondary" disabled>Next</button>
+        </div>
+      </section>
+
+      <p id="td-message" class="message" role="status" aria-live="polite"></p>
     </main>
+
+    <script src="/trapdrills/app.js" defer></script>
   </body>
 </html>

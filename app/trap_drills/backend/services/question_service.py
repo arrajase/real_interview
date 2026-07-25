@@ -1,11 +1,14 @@
 """
 Core question API logic (v2 §8, Module 3): due queue, answer submission, stats.
+Module 11 adds the global+personalized mix on top of get_due_questions.
 
-Module 3 scope is global-only (origin_user_id=None) — Module 11 adds the
-personalized mix on top of get_due_questions. No LLM calls anywhere in this
-file (guardrails §5: no AI on the due-question or answer-submission hot path).
+No LLM calls anywhere in this file (guardrails §5: no AI on the due-question
+or answer-submission hot path) — the personalization weighting signal used
+here (compute_personalized_fraction) is pure Mongo aggregation, no LLM call;
+generation itself happens elsewhere, triggered from GET /role instead.
 """
 
+import random
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -20,7 +23,7 @@ from app.trap_drills.backend.services.trick_questions_db import (
     get_questions_collection,
 )
 
-_GLOBAL_ELIGIBLE_FILTER = {"active": True, "review_status": "approved", "origin_user_id": None}
+_ACTIVE_APPROVED_FILTER = {"active": True, "review_status": "approved"}
 
 
 def _to_object_id(raw: str) -> Optional[ObjectId]:
@@ -30,17 +33,18 @@ def _to_object_id(raw: str) -> Optional[ObjectId]:
         return None
 
 
-def get_due_questions(user_id: str, role: str, limit: int = 15) -> List[Dict[str, Any]]:
+def _get_due_pool(user_id: str, role: str, origin_user_id: Optional[str]) -> List[Dict[str, Any]]:
     """
-    Global-only due queue for this user's effective role (Module 11 adds the
-    personalized mix). Never returns trap_answer/correct_answer/explanation
-    (guardrails §4 — content-leak concern, not just UI nicety).
+    Due items (unseen or Leitner-due) for one pool: origin_user_id=None is the
+    shared/global pool; origin_user_id=<user_id> is that user's own
+    ai_personalized pool. Sorted lowest-box-first within the pool.
     """
     # PyMongo returns stored datetimes as timezone-naive (BSON has no tz),
     # so compare against a naive "now" here to avoid aware/naive TypeErrors.
     now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
     questions_coll = get_questions_collection()
     progress_coll = get_progress_collection()
+    eligible_filter = {**_ACTIVE_APPROVED_FILTER, "role": role, "origin_user_id": origin_user_id}
 
     all_progress = list(
         progress_coll.find({"user_id": user_id, "role": role}, {"question_id": 1, "box": 1, "next_review_at": 1})
@@ -54,27 +58,30 @@ def get_due_questions(user_id: str, role: str, limit: int = 15) -> List[Dict[str
 
     unseen_docs = list(
         questions_coll.find(
-            {**_GLOBAL_ELIGIBLE_FILTER, "role": role, "_id": {"$nin": list(seen_ids)}},
+            {**eligible_filter, "_id": {"$nin": list(seen_ids)}},
             {"_id": 1, "category": 1, "prompt": 1},
         )
     )
-    unseen_ids = {doc["_id"] for doc in unseen_docs}
 
     due_seen_ids = list(due_seen.keys())
     due_seen_docs = (
-        list(
-            questions_coll.find(
-                {**_GLOBAL_ELIGIBLE_FILTER, "_id": {"$in": due_seen_ids}},
-                {"_id": 1, "category": 1, "prompt": 1},
-            )
-        )
+        list(questions_coll.find({**eligible_filter, "_id": {"$in": due_seen_ids}}, {"_id": 1, "category": 1, "prompt": 1}))
         if due_seen_ids
         else []
     )
 
+    is_personalized = origin_user_id is not None
     items: List[Dict[str, Any]] = []
     for doc in unseen_docs:
-        items.append({"question_id": doc["_id"], "category": doc.get("category", ""), "prompt": doc.get("prompt", ""), "box": 0})
+        items.append(
+            {
+                "question_id": doc["_id"],
+                "category": doc.get("category", ""),
+                "prompt": doc.get("prompt", ""),
+                "box": 0,
+                "is_personalized": is_personalized,
+            }
+        )
     for doc in due_seen_docs:
         items.append(
             {
@@ -82,22 +89,59 @@ def get_due_questions(user_id: str, role: str, limit: int = 15) -> List[Dict[str
                 "category": doc.get("category", ""),
                 "prompt": doc.get("prompt", ""),
                 "box": due_seen[doc["_id"]],
+                "is_personalized": is_personalized,
             }
         )
-
     items.sort(key=lambda item: item["box"])
-    limited = items[: max(0, limit)]
-    for item in limited:
+    return items
+
+
+def get_due_questions(user_id: str, role: str, limit: int = 15) -> List[Dict[str, Any]]:
+    """
+    Due queue mixing global + this user's own personalized questions (v2 §7.4).
+    Never returns trap_answer/correct_answer/explanation (guardrails §4 —
+    content-leak concern, not just UI nicety).
+    """
+    from app.trap_drills.backend.services.personalization_service import (
+        compute_personalized_fraction,
+    )
+
+    limit = max(0, limit)
+    global_pool = _get_due_pool(user_id, role, origin_user_id=None)
+    personalized_pool = _get_due_pool(user_id, role, origin_user_id=user_id)
+
+    if not personalized_pool:
+        # No completed interviews or no personalized questions yet -> identical
+        # to pre-Module-11 behavior (100% global).
+        selected = global_pool[:limit]
+    else:
+        fraction = compute_personalized_fraction(user_id, role)
+        # int() truncates rather than rounds, so the personalized share can
+        # never exceed the 50% cap even after slot allocation.
+        personalized_slots = int(limit * fraction)
+        personalized_selected = personalized_pool[:personalized_slots]
+        remaining = limit - len(personalized_selected)
+        global_selected = global_pool[:remaining]
+        # Backfill from whichever pool has leftover capacity so a small
+        # personalized pool never shrinks the total returned below `limit`.
+        combined = personalized_selected + global_selected
+        if len(combined) < limit:
+            leftover_global = global_pool[len(global_selected):]
+            combined += leftover_global[: limit - len(combined)]
+        random.shuffle(combined)  # mixed, not concatenated (v2 §7.4)
+        selected = combined[:limit]
+
+    for item in selected:
         item["question_id"] = str(item["question_id"])
     logger.info(
-        "[trap_drills][question_service] get_due_questions user_id=%s role=%s unseen=%s due_seen=%s returned=%s",
+        "[trap_drills][question_service] get_due_questions user_id=%s role=%s global_pool=%s personalized_pool=%s returned=%s",
         user_id,
         role,
-        len(unseen_ids),
-        len(due_seen),
-        len(limited),
+        len(global_pool),
+        len(personalized_pool),
+        len(selected),
     )
-    return limited
+    return selected
 
 
 def submit_answer(user_id: str, question_id: str, was_correct: bool) -> Dict[str, Any]:
@@ -111,7 +155,7 @@ def submit_answer(user_id: str, question_id: str, was_correct: bool) -> Dict[str
         return {"status_code": 404, "error": "question not found"}
 
     # Data isolation (guardrails §4): a personalized question belongs only to
-    # the user it was generated for, even though Module 3 doesn't create any yet.
+    # the user it was generated for — never answerable by anyone else.
     origin_user_id = question.get("origin_user_id")
     if origin_user_id is not None and origin_user_id != user_id:
         return {"status_code": 404, "error": "question not found"}
@@ -182,7 +226,15 @@ def get_stats(user_id: str, role: str) -> Dict[str, Any]:
     total_by_category: Dict[str, int] = {}
     for doc in questions_coll.aggregate(
         [
-            {"$match": {**_GLOBAL_ELIGIBLE_FILTER, "role": role}},
+            {
+                "$match": {
+                    **_ACTIVE_APPROVED_FILTER,
+                    "role": role,
+                    # Global bank + this user's own personalized questions —
+                    # never another user's (guardrails §4).
+                    "$or": [{"origin_user_id": None}, {"origin_user_id": user_id}],
+                }
+            },
             {"$group": {"_id": "$category", "count": {"$sum": 1}}},
         ]
     ):

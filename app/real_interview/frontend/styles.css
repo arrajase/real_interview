@@ -896,3 +896,100 @@ label.confirm-delete input {
   margin: 0.5rem 0 0;
 }
 
+/* Interview Trap Drills (app/trap_drills/frontend) */
+
+.role-banner-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.role-banner-info {
+  font-size: 1rem;
+}
+
+.role-banner-label {
+  color: var(--muted);
+  margin-right: 0.35rem;
+}
+
+#role-banner-current {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.role-banner-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.role-banner-controls select {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.trap-drills-nav {
+  margin-bottom: 0;
+}
+
+.review-category {
+  margin: 0 0 0.35rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.review-prompt {
+  margin: 0 0 0.85rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+.review-reveal {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border);
+}
+
+.review-reveal p {
+  margin: 0 0 0.5rem;
+}
+
+.review-reveal-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.role-picker-prompt {
+  padding: 0.5rem 0;
+}
+
+.weak-category-badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--danger);
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
