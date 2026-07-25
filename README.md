@@ -4,13 +4,14 @@ Flask application that guides a candidate from account setup through resume uplo
 
 **Live site:** [https://real-interview-lpd6.onrender.com/](https://real-interview-lpd6.onrender.com/)  
 **Admin dashboard:** [https://real-interview-lpd6.onrender.com/admin](https://real-interview-lpd6.onrender.com/admin)  
-**Feedback:** [https://real-interview-lpd6.onrender.com/feedback](https://real-interview-lpd6.onrender.com/feedback)
+**Feedback:** [https://real-interview-lpd6.onrender.com/feedback](https://real-interview-lpd6.onrender.com/feedback)  
+**Interview Trap Drills:** [https://real-interview-lpd6.onrender.com/trapdrills](https://real-interview-lpd6.onrender.com/trapdrills) — a sibling app on the same server; see [Interview Trap Drills](#interview-trap-drills)
 
-Local development: `http://localhost:5000` (app), `http://localhost:5000/admin` (admin), and `http://localhost:5000/feedback` (feedback).
+Local development: `http://localhost:5000` (app), `http://localhost:5000/admin` (admin), `http://localhost:5000/feedback` (feedback), and `http://localhost:5000/trapdrills` (Trap Drills).
 
 ## 🎯 Vision
-Build an Agentic AI application that simulates mock interviews based on a candidate’s resume and job description.  
-Initial form: **chat-based app** → later extended with analytics, personalization, and enterprise features.
+Build an Agentic AI platform for interview preparation. **Real Interview** simulates mock interviews grounded in a candidate's resume and job description; **Interview Trap Drills** complements it with spaced-repetition drilling on role-specific "trick" interview questions, personalized from your own completed interviews. Both apps share one login, one server, and one codebase.  
+Initial form: **chat-based app** → extended with analytics, personalization, and now a second practice app on the same platform.
 
 ## Project layout
 
@@ -33,6 +34,20 @@ app/real_interview/
 ├── frontend/                   # Static UI (index.html, admin.html, feedback.html, *.js)
 └── data/                       # Reserved data paths (config, transcripts, etc.)
 
+app/trap_drills/                # Sibling app — see Interview Trap Drills section below
+├── backend/
+│   ├── routes/                 # /trapdrills page routes + /api/trap-drills API routes
+│   ├── services/                # Role model, Leitner logic, due-queue mixing, dashboard,
+│   │                            #   question management, history, AI seeding, personalization
+│   ├── agents/                 # TrickQuestionAgent (Phase 1 + Phase 2 generation)
+│   ├── state/                  # Pydantic schemas for structured LLM output
+│   ├── config/                 # Fixed role/category/keyword config
+│   ├── seed_data/               # Agile/Scrum starter question set
+│   ├── scripts/                 # Seed script + operator-only Phase 1 generation script
+│   └── tests/                   # Unit tests (Leitner logic, dashboard weak-category rule)
+├── frontend/                   # Static UI (index.html, app.js) — reuses real_interview's styles.css
+└── data/                       # Reserved, unused for now
+
 params.yaml                     # Interview limits, summarizer/feedback thresholds (project root)
 ```
 
@@ -42,7 +57,7 @@ params.yaml                     # Interview limits, summarizer/feedback threshol
 
 ---
 
-## 🚀 Phase 1: MVP (3–4 months)
+## 🚀 Phase 1: Real Interview MVP (3–4 months)
 **Objective:** Deliver a secure, working chat-based mock interview app.
 
 ### Features
@@ -55,6 +70,20 @@ params.yaml                     # Interview limits, summarizer/feedback threshol
 - Website feedback page — visitors email suggestions and bug reports to the site owner.
 - Admin dashboard for signups and usage metrics (active accounts only).
 
+---
+
+## 🚀 Phase 2: Interview Trap Drills
+**Objective:** Add a second practice app — spaced-repetition drilling on role-specific "trick" interview questions — sharing Real Interview's login, database, and server rather than standing up a separate deployment.
+
+### Features
+- Resume-gated **App Picker** linking Real Interview and Trap Drills after a single login.
+- Role model: fixed roles and categories, keyword-based auto-detection from your Real Interview job applications, manual override.
+- Leitner-box spaced repetition across four screens — Today's Review, Category Dashboard, Manage Questions, History.
+- Phase 1 AI-assisted question generation with a human approve/reject review queue before anything reaches a due queue.
+- Phase 2 AI personalization grounded in a user's own completed Real Interview sessions, mixed into their due queue.
+- ~40-question Agile/Scrum starter set seeded out of the box; other roles fill in over time.
+
+See [Interview Trap Drills](#interview-trap-drills) below for the full details.
 
 **Do not commit `.env`** — it contains secrets. Use `.env_copy` or similar as a template without real keys.
 
@@ -269,6 +298,116 @@ Use **Use app default** on the profile to clear a personal override.
 | `GET /api/avatar/discuss/context` | Avatar chat readiness + latest resume metadata |
 | `POST /api/avatar/discuss` | Ask the ideal avatar a practice question (see [Candidate Avatar](#candidate-avatar)) |
 | `DELETE /api/users` | Delete account (email + password); removes auth, resumes, jobs, in-progress interviews; **completed** interviews retained in DB |
+
+---
+
+## Interview Trap Drills
+
+**Interview Trap Drills** is a sibling app living alongside Real Interview in this same repo, deployed by the same server, sharing the same login, MongoDB cluster, and frontend conventions — but presented as a distinct application. It's a spaced-repetition drilling tool for role-specific "trick" interview questions: the kind that test precise boundaries and judgment calls within a role (e.g., for Agile: who owns the Definition of Done vs. acceptance criteria), not just surface knowledge.
+
+| Environment | URL |
+|-------------|-----|
+| Production | [https://real-interview-lpd6.onrender.com/trapdrills](https://real-interview-lpd6.onrender.com/trapdrills) |
+| Local | [http://localhost:5000/trapdrills](http://localhost:5000/trapdrills) |
+
+No new environment variables, dependencies, or MongoDB cluster are required — it reuses everything Real Interview already has configured.
+
+### Getting there: the App Picker
+
+Trap Drills doesn't have its own login. After signing in:
+
+- **No resume uploaded yet** → you land on the existing **Your profile** page, exactly as before — nothing changes for new users.
+- **At least one resume uploaded** → you land on an **App Picker** screen instead, with two tiles: **Real Interview** (back to your profile) and **Interview Trap Drills**.
+
+The first successful resume upload triggers a one-time redirect to the App Picker. From either app, a **Switch app** link returns you to the picker at any time.
+
+### Role model
+
+Trap Drills organizes its question bank by **role**, and each role has its own set of **categories**:
+
+| Role | Categories |
+|------|------------|
+| Agile / Scrum | Role Boundaries, Estimation/Velocity, Prioritization Under Pressure, SAFe/Scaling, Ceremony Ownership |
+| Backend Engineering | API Design, Data Consistency, Failure Handling, Performance/Scaling, Observability |
+| Frontend Engineering | Rendering/Performance, State Management, Accessibility, Browser Compatibility, Component Architecture |
+| Data Science / ML | Model Evaluation, Data Leakage, Feature Engineering, Bias/Fairness, Experiment Design |
+| DevOps / SRE | Incident Response, Deployment Strategy, Monitoring/Alerting, Capacity Planning, Access/Security |
+| Product Management | Prioritization, Stakeholder Management, Metrics/Success Criteria, Roadmapping, Scope Tradeoffs |
+
+Your **effective role** is resolved as: **manual override, else auto-detected, else none**.
+
+- **Auto-detection** is simple keyword matching against your most recent Real Interview job application's role text (e.g. "Senior Scrum Master" → Agile / Scrum) — never an LLM call.
+- If nothing matches (or you have no job application yet), Trap Drills shows a first-visit role picker with no pre-selection.
+- Switch roles anytime from the role banner at the top of every Trap Drills screen; your choice is stored as an override on your account and always wins over auto-detection.
+
+### Screens
+
+| Screen | What it does |
+|--------|---------------|
+| **Today's Review** | One due question at a time. Type your own answer as scratch notes, then self-assess **I got it right** / **I got it wrong** — this reveals the trap answer, correct answer, and explanation. **Next** advances; a progress indicator shows "3 of 8 today." Personalized questions (see below) carry a **Report this question** action. |
+| **Category Dashboard** | One row per category in your current role: total questions, mastered count, accuracy %. Categories with low accuracy or nothing mastered yet are flagged **Needs work**. |
+| **Manage Questions** | Add/edit/soft-delete questions in the shared bank (role, category, prompt, trap answer, correct answer, explanation). A **Pending review** tab lists AI-generated questions awaiting Approve/Reject. |
+| **History** | Paginated log of past attempts — question, role, correct/incorrect, timestamp, box after — filterable by role. |
+
+### Spaced repetition (Leitner boxes)
+
+Each question you've attempted sits in a box (1–5) with a review interval: 1 day, 3 days, 1 week, 2 weeks, 30 days. A correct answer advances one box (capped at 5, "mastered"); an incorrect answer always drops back to box 1. A question is **due** if it's never been attempted or its box's review date has passed.
+
+### AI-assisted question seeding
+
+Question *content* is AI-assisted in two ways — but role *detection* (above) never is:
+
+- **Phase 1 — global bank generation.** Operator-triggered only (a script, never an end-user-facing button, never exposed on any UI): generates candidate questions for a role/category and inserts them as `pending_review`. They stay invisible to every due queue until approved through **Manage Questions**, because a hallucinated "correct answer" would be actively harmful in a tool whose whole point is telling you what's right.
+
+  ```bash
+  python -m app.trap_drills.backend.scripts.generate_global_questions "Backend Engineering" "API Design" --count 5
+  ```
+
+- **Phase 2 — personalized generation.** Lazily triggered the first time you open Trap Drills after completing a Real Interview mock interview session (matching your effective role): it reads that session's transcript and feedback, generates a handful of questions targeting what you actually struggled with, and inserts them **pre-approved but private to you only** — no one else's due queue, stats, or history ever sees them. Already-processed sessions are never reprocessed.
+
+  Your due queue mixes shared/global questions with your own personalized ones, weighted by how many distinct weak areas your interview feedback has flagged (capped at 50% personalized, so global variety is never crowded out). No completed interviews yet? Your due queue is 100% global, same as everyone else's.
+
+  Not sure about a personalized question? Click **Report this question** — it's pulled from your due queue immediately pending another look, without affecting anyone else.
+
+### Seed data
+
+Ships with a ~40-question manually-authored Agile/Scrum starter set across all five of its categories; other roles start empty until content is added via **Manage Questions** or Phase 1 generation.
+
+```bash
+python -m app.trap_drills.backend.scripts.seed_agile_scrum
+```
+
+Safe to re-run — it dedupes on question text within the role.
+
+### API (JWT cookie required, same as the rest of the app)
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/trap-drills/role` | Detected role, override, effective role, full role list; also triggers Phase 2 personalization if needed |
+| `PUT /api/trap-drills/role` | Body: `{ "role": "Backend Engineering" }` or `{ "role": null }` to clear the override |
+| `GET /api/trap-drills/questions/due?limit=15` | Today's mixed due queue (never includes answer content) |
+| `POST /api/trap-drills/questions/answer` | Body: `{ "question_id", "was_correct" }` → new box, next review date, trap/correct/explanation |
+| `GET /api/trap-drills/stats` | Per-category breakdown for the Category Dashboard |
+| `GET /api/trap-drills/questions?role=…` | List the shared question bank, filterable by role |
+| `POST /api/trap-drills/questions` | Add a question (defaults to `manual` / `approved`) |
+| `PUT /api/trap-drills/questions/<id>` | Edit a question |
+| `DELETE /api/trap-drills/questions/<id>` | Soft-delete (never a hard delete) |
+| `GET /api/trap-drills/questions/pending-review` | List AI-generated questions awaiting review |
+| `POST /api/trap-drills/questions/<id>/review` | Body: `{ "decision": "approve" \| "reject" }` |
+| `POST /api/trap-drills/questions/<id>/report` | Flags one of *your* personalized questions for another look |
+| `GET /api/trap-drills/history?role=…&page=1&page_size=20` | Paginated past attempts |
+
+### Data model
+
+Three new MongoDB collections in the same database Real Interview already uses:
+
+| Collection | Purpose |
+|------------|---------|
+| `trick_questions` | The question bank — `role`, `category`, `prompt`, `trap_answer`, `correct_answer`, `explanation`, `source` (`manual`/`ai_generated`/`ai_personalized`), `review_status` (`approved`/`pending_review`/`rejected`), `origin_user_id` (null for shared questions), `source_session_id` |
+| `trick_question_progress` | Per-user Leitner state — `box`, `next_review_at`, `last_result`, `total_attempts` |
+| `trick_question_attempts` | Append-only attempt log backing the History screen |
+
+Plus two new fields on the existing `authentications` collection: `trap_drills_role_override` and `trap_drills_processed_session_ids`.
 
 ---
 
