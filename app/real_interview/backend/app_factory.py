@@ -10,6 +10,7 @@ from app.real_interview.backend.routes import (
     avatar_blueprint,
     feedback_blueprint,
     interview_blueprint,
+    interviewer_practice_blueprint,
     job_application_blueprint,
     resume_blueprint,
     user_maintenance_blueprint,
@@ -39,6 +40,9 @@ def create_app() -> Flask:
 
     logger.info("[app_factory] registering interview blueprint")
     app.register_blueprint(interview_blueprint)
+
+    logger.info("[app_factory] registering interviewer_practice blueprint")
+    app.register_blueprint(interviewer_practice_blueprint)
 
     logger.info("[app_factory] registering avatar blueprint")
     app.register_blueprint(avatar_blueprint)

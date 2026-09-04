@@ -40,6 +40,15 @@ def _delete_incomplete_interviews_for_customer(customer_oid: ObjectId) -> tuple[
     return delete_incomplete_interviews_for_candidate(str(customer_oid))
 
 
+def _delete_incomplete_practice_sessions_for_customer(customer_oid: ObjectId) -> tuple[int, int]:
+    """Delete in-progress interviewer-practice sessions only; completed sessions are retained."""
+    from app.real_interview.backend.services.interviewer_practice_record import (
+        delete_incomplete_practice_sessions_for_user,
+    )
+
+    return delete_incomplete_practice_sessions_for_user(str(customer_oid))
+
+
 def delete_user_account(email: str, password: str) -> Dict[str, Any]:
     """
     Verify email/password, then remove the user from authentications and delete
@@ -83,13 +92,19 @@ def delete_user_account(email: str, password: str) -> Dict[str, Any]:
 
         from app.real_interview.backend.graphs.checkpointer import delete_thread_checkpoints
         from app.real_interview.backend.services.interview_record import list_incomplete_session_ids_for_candidate
+        from app.real_interview.backend.services.interviewer_practice_record import (
+            list_incomplete_practice_session_ids_for_user,
+        )
 
         for session_id in list_incomplete_session_ids_for_candidate(str(user_oid)):
+            delete_thread_checkpoints(session_id)
+        for session_id in list_incomplete_practice_session_ids_for_user(str(user_oid)):
             delete_thread_checkpoints(session_id)
 
         db = get_mongodb_database(_get_db_name())
         jobs_deleted = _delete_job_applications_for_customer(db, user_oid)
         interviews_deleted, interviews_retained = _delete_incomplete_interviews_for_customer(user_oid)
+        practice_deleted, practice_retained = _delete_incomplete_practice_sessions_for_customer(user_oid)
 
         delete_result = auth_coll.delete_one({"_id": user_oid})
         if delete_result.deleted_count != 1:
@@ -98,13 +113,15 @@ def delete_user_account(email: str, password: str) -> Dict[str, Any]:
 
         logger.info(
             "[user_delete] account removed user_id=%s resumes=%s gridfs=%s jobs=%s "
-            "interviews_deleted=%s interviews_retained=%s",
+            "interviews_deleted=%s interviews_retained=%s practice_deleted=%s practice_retained=%s",
             user_oid,
             resumes_deleted,
             gridfs_deleted,
             jobs_deleted,
             interviews_deleted,
             interviews_retained,
+            practice_deleted,
+            practice_retained,
         )
         return _success(
             200,
@@ -116,9 +133,11 @@ def delete_user_account(email: str, password: str) -> Dict[str, Any]:
                     "gridfs_files": gridfs_deleted,
                     "job_application": jobs_deleted,
                     "interview_in_progress": interviews_deleted,
+                    "interviewer_practice_in_progress": practice_deleted,
                 },
                 "retained": {
                     "interview_completed": interviews_retained,
+                    "interviewer_practice_completed": practice_retained,
                 },
             },
         )

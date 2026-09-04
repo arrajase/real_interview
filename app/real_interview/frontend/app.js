@@ -7,6 +7,7 @@
   var STORAGE_KEY_RESUME_PARSED = "ri_resume_parsed";
   var STORAGE_KEY_JOB_APPLICATION_ID = "ri_job_application_id";
   var STORAGE_KEY_INTERVIEW_SESSION = "ri_interview_session";
+  var STORAGE_KEY_PRACTICE_SESSION = "ri_practice_session";
   var JOB_MODE_LINK = "link";
   var JOB_MODE_DESCRIPTION = "description";
 
@@ -134,6 +135,23 @@
     }
   }
 
+  function getStoredPracticeSessionId() {
+    try {
+      return sessionStorage.getItem(STORAGE_KEY_PRACTICE_SESSION) || "";
+    } catch (e) {
+      return "";
+    }
+  }
+
+  function setStoredPracticeSessionId(sessionId) {
+    try {
+      if (sessionId) sessionStorage.setItem(STORAGE_KEY_PRACTICE_SESSION, sessionId);
+      else sessionStorage.removeItem(STORAGE_KEY_PRACTICE_SESSION);
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
   function setStoredResume(resumeId, parsedData) {
     try {
       if (resumeId) sessionStorage.setItem(STORAGE_KEY_RESUME_ID, resumeId);
@@ -194,6 +212,10 @@
     if (avatarDisplay) avatarDisplay.textContent = value;
     var pickerDisplay = $("display-user-email-picker");
     if (pickerDisplay) pickerDisplay.textContent = value;
+    var practiceSetupDisplay = $("display-user-email-practice-setup");
+    if (practiceSetupDisplay) practiceSetupDisplay.textContent = value;
+    var practiceChatDisplay = $("display-user-email-practice-chat");
+    if (practiceChatDisplay) practiceChatDisplay.textContent = value;
   }
 
   function formatInterviewerMessageContent(content, panelPlan) {
@@ -232,6 +254,19 @@
         text = formatInterviewerMessageContent(text, panelPlan);
       }
       div.textContent = text;
+      container.appendChild(div);
+    });
+    container.scrollTop = container.scrollHeight;
+  }
+
+  function renderPracticeChatMessages(messages) {
+    var container = $("practice-chat-messages");
+    if (!container) return;
+    container.textContent = "";
+    (messages || []).forEach(function (m) {
+      var div = document.createElement("div");
+      div.className = "chat-bubble " + (m.role === "user" ? "user" : "assistant");
+      div.textContent = m.content || "";
       container.appendChild(div);
     });
     container.scrollTop = container.scrollHeight;
@@ -293,9 +328,9 @@
     return section;
   }
 
-  function renderInterviewReportFromPayload(report) {
+  function renderInterviewReportFromPayload(report, containerId) {
     if (!report) return;
-    var container = $("interview-report");
+    var container = $(containerId || "interview-report");
     if (!container) return;
 
     container.textContent = "";
@@ -440,6 +475,21 @@
     });
   }
 
+  function loadPracticeReport(sessionId, msgEl) {
+    if (!sessionId) return Promise.resolve();
+    if (msgEl) setMessage(msgEl, "Loading report…", "ok");
+    return apiGet("/api/interviewer-practice/report?session_id=" + encodeURIComponent(sessionId)).then(
+      function (r) {
+        if (!r.ok) {
+          if (msgEl) setMessage(msgEl, (r.data && r.data.error) || "Could not load report.", "error");
+          return;
+        }
+        renderInterviewReportFromPayload(r.data.report || {}, "practice-report");
+        if (msgEl) clearMessage(msgEl);
+      }
+    );
+  }
+
   function createDownloadIconButton(ariaLabel, onClick) {
     var btn = document.createElement("button");
     btn.type = "button";
@@ -456,18 +506,11 @@
     return btn;
   }
 
-  function downloadInterviewReportPdf(sessionId, msgEl) {
-    if (!sessionId) {
-      if (msgEl) setMessage(msgEl, "Session missing.", "error");
-      return Promise.resolve();
-    }
-    return fetch(
-      "/api/interview/report/download?session_id=" + encodeURIComponent(sessionId),
-      {
-        credentials: fetchCredentials(),
-        headers: authHeaders(),
-      }
-    )
+  function downloadReportPdf(url, defaultFilename, msgEl) {
+    return fetch(url, {
+      credentials: fetchCredentials(),
+      headers: authHeaders(),
+    })
       .then(function (res) {
         if (res.status === 401) {
           handleUnauthorized();
@@ -481,26 +524,50 @@
         }
         var disposition = res.headers.get("Content-Disposition") || "";
         var match = disposition.match(/filename=\"?([^\";]+)\"?/i);
-        var filename = (match && match[1]) || "interview-report.pdf";
+        var filename = (match && match[1]) || defaultFilename;
         return res.blob().then(function (blob) {
           return { blob: blob, filename: filename };
         });
       })
       .then(function (payload) {
         if (!payload) return;
-        var url = URL.createObjectURL(payload.blob);
+        var url2 = URL.createObjectURL(payload.blob);
         var anchor = document.createElement("a");
-        anchor.href = url;
+        anchor.href = url2;
         anchor.download = payload.filename;
         document.body.appendChild(anchor);
         anchor.click();
         anchor.remove();
-        URL.revokeObjectURL(url);
+        URL.revokeObjectURL(url2);
         if (msgEl) setMessage(msgEl, "Report downloaded.", "ok");
       })
       .catch(function () {
         if (msgEl) setMessage(msgEl, "Network error. Try again.", "error");
       });
+  }
+
+  function downloadInterviewReportPdf(sessionId, msgEl) {
+    if (!sessionId) {
+      if (msgEl) setMessage(msgEl, "Session missing.", "error");
+      return Promise.resolve();
+    }
+    return downloadReportPdf(
+      "/api/interview/report/download?session_id=" + encodeURIComponent(sessionId),
+      "interview-report.pdf",
+      msgEl
+    );
+  }
+
+  function downloadPracticeReportPdf(sessionId, msgEl) {
+    if (!sessionId) {
+      if (msgEl) setMessage(msgEl, "Session missing.", "error");
+      return Promise.resolve();
+    }
+    return downloadReportPdf(
+      "/api/interviewer-practice/report/download?session_id=" + encodeURIComponent(sessionId),
+      "interviewer-practice-report.pdf",
+      msgEl
+    );
   }
 
   function applyInterviewStateToUi(state) {
@@ -563,6 +630,49 @@
     }
   }
 
+  function applyPracticeStateToUi(state) {
+    if (!state) return;
+    var sessionEl = $("display-practice-session-id");
+    if (sessionEl) sessionEl.textContent = state.session_id || getStoredPracticeSessionId() || "";
+    renderPracticeChatMessages(state.messages || []);
+    var feedback = state.candidate_post_interview_feedback;
+    var wrap = $("practice-feedback-wrap");
+    var msgEl = $("practice-chat-message");
+    if (feedback && wrap) {
+      showElement(wrap, true);
+      showElement($("btn-download-practice-report"), true);
+      showElement($("btn-back-profile-after-practice"), true);
+      showElement($("form-practice-chat"), false);
+      showElement($("btn-end-practice"), false);
+      showElement($("btn-pause-practice"), false);
+      showElement($("btn-resume-practice"), false);
+      var sessionId = state.session_id || getStoredPracticeSessionId();
+      loadPracticeReport(sessionId, msgEl);
+    } else {
+      showElement($("btn-back-profile-after-practice"), false);
+      showElement($("btn-download-practice-report"), false);
+      var paused = state.interview_status === "paused";
+      var form = $("form-practice-chat");
+      var input = $("practice-chat-input");
+      var btnPause = $("btn-pause-practice");
+      var btnResume = $("btn-resume-practice");
+      var btnEnd = $("btn-end-practice");
+      var sendBtn = form ? form.querySelector('button[type="submit"]') : null;
+      showElement(btnPause, !paused);
+      showElement(btnResume, paused);
+      showElement(btnEnd, !paused);
+      showElement(form, !paused);
+      if (input) {
+        input.disabled = paused;
+        if (!paused) input.focus();
+      }
+      if (sendBtn) sendBtn.disabled = paused;
+      if (paused) {
+        setMessage(msgEl, "Practice session paused. Click Resume when you are ready to continue.", "ok");
+      }
+    }
+  }
+
   function showInterviewChatView(email, sessionId) {
     hideView("view-auth");
     hideView("view-app-picker");
@@ -570,6 +680,8 @@
     hideView("view-upload");
     hideView("view-job-application");
     hideView("view-avatar-discuss");
+    hideView("view-interviewer-practice-setup");
+    hideView("view-interviewer-practice-chat");
     showView("view-interview-chat");
     setSignedInEmail(email);
     if (sessionId) {
@@ -580,6 +692,28 @@
     clearMessage($("chat-message"));
   }
 
+  function showInterviewerPracticeChatView(email, sessionId) {
+    hideView("view-auth");
+    hideView("view-app-picker");
+    hideView("view-profile");
+    hideView("view-upload");
+    hideView("view-job-application");
+    hideView("view-avatar-discuss");
+    hideView("view-interview-chat");
+    hideView("view-interviewer-practice-setup");
+    showView("view-interviewer-practice-chat");
+    setSignedInEmail(email);
+    if (sessionId) {
+      setStoredPracticeSessionId(sessionId);
+      var sessionEl = $("display-practice-session-id");
+      if (sessionEl) sessionEl.textContent = sessionId;
+    }
+    showElement($("practice-feedback-wrap"), false);
+    var reportEl = $("practice-report");
+    if (reportEl) reportEl.textContent = "";
+    clearMessage($("practice-chat-message"));
+  }
+
   function showAuthView() {
     hideView("view-app-picker");
     hideView("view-profile");
@@ -587,6 +721,8 @@
     hideView("view-job-application");
     hideView("view-interview-chat");
     hideView("view-avatar-discuss");
+    hideView("view-interviewer-practice-setup");
+    hideView("view-interviewer-practice-chat");
     showView("view-auth");
     showAuthPanel("signup");
     clearMessage($("auth-message"));
@@ -685,6 +821,8 @@
     hideView("view-upload");
     hideView("view-job-application");
     hideView("view-interview-chat");
+    hideView("view-interviewer-practice-setup");
+    hideView("view-interviewer-practice-chat");
     showView("view-avatar-discuss");
     setSignedInEmail(email || getStoredUserEmail());
     clearMessage($("avatar-discuss-message"));
@@ -728,6 +866,31 @@
     });
   }
 
+  var practiceSelectedResumeId = "";
+  var practiceJobApplicationId = "";
+
+  function showInterviewerPracticeSetupView(email) {
+    hideView("view-auth");
+    hideView("view-app-picker");
+    hideView("view-profile");
+    hideView("view-upload");
+    hideView("view-job-application");
+    hideView("view-avatar-discuss");
+    hideView("view-interview-chat");
+    hideView("view-interviewer-practice-chat");
+    showView("view-interviewer-practice-setup");
+    setSignedInEmail(email || getStoredUserEmail());
+    clearMessage($("practice-setup-message"));
+    practiceSelectedResumeId = "";
+    practiceJobApplicationId = "";
+    showElement($("practice-resume-list-wrap"), false);
+    var toggle = $("practice-target-role-toggle");
+    if (toggle) toggle.checked = false;
+    showElement($("practice-role-target-wrap"), false);
+    var textarea = $("practice-job-description");
+    if (textarea) textarea.value = "";
+  }
+
   function showProfileView(email) {
     hideView("view-auth");
     hideView("view-app-picker");
@@ -735,6 +898,8 @@
     hideView("view-job-application");
     hideView("view-interview-chat");
     hideView("view-avatar-discuss");
+    hideView("view-interviewer-practice-setup");
+    hideView("view-interviewer-practice-chat");
     showView("view-profile");
     setSignedInEmail(email);
     clearMessage($("profile-message"));
@@ -752,6 +917,8 @@
     hideView("view-job-application");
     hideView("view-interview-chat");
     hideView("view-avatar-discuss");
+    hideView("view-interviewer-practice-setup");
+    hideView("view-interviewer-practice-chat");
     showView("view-app-picker");
     setSignedInEmail(email);
   }
@@ -763,6 +930,8 @@
     hideView("view-job-application");
     hideView("view-interview-chat");
     hideView("view-avatar-discuss");
+    hideView("view-interviewer-practice-setup");
+    hideView("view-interviewer-practice-chat");
     showView("view-upload");
     setSignedInEmail(email);
     clearMessage($("auth-message"));
@@ -778,6 +947,8 @@
     hideView("view-upload");
     hideView("view-interview-chat");
     hideView("view-avatar-discuss");
+    hideView("view-interviewer-practice-setup");
+    hideView("view-interviewer-practice-chat");
     showView("view-job-application");
     setSignedInEmail(email);
     clearMessage($("auth-message"));
@@ -1469,6 +1640,77 @@
     });
   }
 
+  function setProfilePracticeStatActive(kind) {
+    var completed = $("link-profile-practice-completed");
+    var paused = $("link-profile-practice-paused");
+    if (completed) completed.classList.toggle("is-active", kind === "completed");
+    if (paused) paused.classList.toggle("is-active", kind === "paused");
+  }
+
+  function renderProfilePracticeSessionsTable(kind, sessions) {
+    var wrap = $("profile-practice-sessions-wrap");
+    var heading = $("profile-practice-sessions-heading");
+    var tbody = $("profile-practice-sessions-body");
+    if (!tbody) return;
+    tbody.textContent = "";
+
+    if (heading) {
+      heading.textContent = kind === "paused" ? "Paused practice sessions" : "Completed practice sessions";
+    }
+
+    (sessions || []).forEach(function (item) {
+      var tr = document.createElement("tr");
+
+      function addCell(text) {
+        var td = document.createElement("td");
+        td.textContent = text || "—";
+        tr.appendChild(td);
+      }
+
+      addCell(item.role_applied_for || "—");
+      addCell(formatResumeDate(item.interview_date));
+      addCell(item.interview_status === "paused" ? formatResumeDate(item.paused_at) : "—");
+      addCell(item.interview_status || "—");
+      addCell(String(item.message_count != null ? item.message_count : "—"));
+
+      var tdReport = document.createElement("td");
+      tdReport.className = "profile-interviews-report-col";
+      if (kind === "completed" && item.session_id) {
+        tdReport.appendChild(
+          createDownloadIconButton("Download practice report", function () {
+            downloadPracticeReportPdf(item.session_id, $("profile-message"));
+          })
+        );
+      } else {
+        tdReport.textContent = "—";
+      }
+      tr.appendChild(tdReport);
+
+      tbody.appendChild(tr);
+    });
+
+    showElement(wrap, true);
+    setProfilePracticeStatActive(kind);
+  }
+
+  function loadProfilePracticeSessionsTable(kind) {
+    var msg = $("profile-message");
+    return apiGet("/api/users/profile/interviewer-practice-sessions?status=" + encodeURIComponent(kind)).then(
+      function (r) {
+        if (!r.ok) {
+          setMessage(msg, (r.data && r.data.error) || "Could not load practice sessions.", "error");
+          return;
+        }
+        renderProfilePracticeSessionsTable(kind, r.data.interviews || []);
+        if (!(r.data.interviews || []).length) {
+          setMessage(msg, "No " + kind + " practice sessions yet.", "ok");
+        } else {
+          clearMessage(msg);
+        }
+      }
+    );
+  }
+
   function renderProfileInterviewSettings(settings) {
     if (!settings) return;
 
@@ -1525,11 +1767,21 @@
   function loadProfileData() {
     var completedEl = $("profile-count-completed");
     var pausedEl = $("profile-count-paused");
+    var practiceCompletedEl = $("profile-count-practice-completed");
+    var practicePausedEl = $("profile-count-practice-paused");
     apiGet("/api/users/profile").then(function (r) {
       if (!r.ok) return;
       if (r.data.interview_counts) {
         if (completedEl) completedEl.textContent = String(r.data.interview_counts.completed || 0);
         if (pausedEl) pausedEl.textContent = String(r.data.interview_counts.paused || 0);
+      }
+      if (r.data.interviewer_practice_counts) {
+        if (practiceCompletedEl) {
+          practiceCompletedEl.textContent = String(r.data.interviewer_practice_counts.completed || 0);
+        }
+        if (practicePausedEl) {
+          practicePausedEl.textContent = String(r.data.interviewer_practice_counts.paused || 0);
+        }
       }
       if (r.data.interview_settings) {
         renderProfileInterviewSettings(r.data.interview_settings);
@@ -1591,6 +1843,32 @@
     if (pausedLink) {
       pausedLink.addEventListener("click", function () {
         loadProfileInterviewTable("paused");
+      });
+    }
+
+    var practiceBtn = $("btn-profile-practice-interviewer");
+    if (practiceBtn) {
+      practiceBtn.addEventListener("click", function () {
+        showInterviewerPracticeSetupView(getStoredUserEmail());
+      });
+    }
+
+    var resumePracticeBtn = $("btn-profile-resume-practice");
+    if (resumePracticeBtn) {
+      resumePracticeBtn.addEventListener("click", resumeLatestPausedPracticeSession);
+    }
+
+    var practiceCompletedLink = $("link-profile-practice-completed");
+    if (practiceCompletedLink) {
+      practiceCompletedLink.addEventListener("click", function () {
+        loadProfilePracticeSessionsTable("completed");
+      });
+    }
+
+    var practicePausedLink = $("link-profile-practice-paused");
+    if (practicePausedLink) {
+      practicePausedLink.addEventListener("click", function () {
+        loadProfilePracticeSessionsTable("paused");
       });
     }
 
@@ -2029,6 +2307,350 @@
     });
   }
 
+  function renderPracticeResumeTable(resumes, msgEl) {
+    var wrap = $("practice-resume-list-wrap");
+    var tbody = $("practice-resume-table-body");
+    if (!tbody) return;
+    tbody.textContent = "";
+
+    resumes.forEach(function (item) {
+      var tr = document.createElement("tr");
+      tr.setAttribute("data-resume-id", item.resume_id);
+
+      var tdDate = document.createElement("td");
+      tdDate.textContent = formatResumeDate(item.uploaded_ts);
+
+      var tdResume = document.createElement("td");
+      var link = document.createElement("button");
+      link.type = "button";
+      link.className = "resume-link";
+      link.textContent = item.label || "Resume";
+      link.addEventListener("click", function () {
+        practiceSelectedResumeId = item.resume_id;
+        var rows = document.querySelectorAll("#practice-resume-table-body tr");
+        rows.forEach(function (row) {
+          row.classList.toggle("is-selected", row.getAttribute("data-resume-id") === item.resume_id);
+        });
+        setMessage(msgEl, "Resume selected: " + (item.label || "Resume"), "ok");
+      });
+      tdResume.appendChild(link);
+
+      tr.appendChild(tdDate);
+      tr.appendChild(tdResume);
+      tbody.appendChild(tr);
+    });
+
+    showElement(wrap, true);
+  }
+
+  function wireInterviewerPracticeSetup() {
+    var fetchBtn = $("btn-practice-fetch-resume");
+    if (fetchBtn) {
+      fetchBtn.addEventListener("click", function () {
+        var msg = $("practice-setup-message");
+        clearMessage(msg);
+        showElement($("practice-resume-list-wrap"), false);
+
+        if (!isSignedIn()) {
+          setMessage(msg, "Session missing. Please sign in again.", "error");
+          handleUnauthorized();
+          return;
+        }
+
+        fetchBtn.disabled = true;
+        apiGet("/api/resumes")
+          .then(function (r) {
+            if (!r.ok) {
+              setMessage(msg, (r.data && r.data.error) || "Could not fetch resumes.", "error");
+              return;
+            }
+            var resumes = r.data.resumes || [];
+            if (!resumes.length) {
+              setMessage(msg, "No saved resumes found. Upload a resume on your profile first.", "error");
+              return;
+            }
+            if (resumes.length === 1) {
+              practiceSelectedResumeId = resumes[0].resume_id;
+              setMessage(msg, "Resume selected: " + (resumes[0].label || "Resume"), "ok");
+              return;
+            }
+            renderPracticeResumeTable(resumes, msg);
+            setMessage(msg, "Select a resume from the list.", "ok");
+          })
+          .catch(function () {
+            setMessage(msg, "Network error. Try again.", "error");
+          })
+          .finally(function () {
+            fetchBtn.disabled = false;
+          });
+      });
+    }
+
+    var toggle = $("practice-target-role-toggle");
+    if (toggle) {
+      toggle.addEventListener("change", function () {
+        showElement($("practice-role-target-wrap"), toggle.checked);
+      });
+    }
+
+    var saveRoleBtn = $("btn-practice-save-role-target");
+    if (saveRoleBtn) {
+      saveRoleBtn.addEventListener("click", function () {
+        var msg = $("practice-setup-message");
+        clearMessage(msg);
+        var textarea = $("practice-job-description");
+        var text = textarea ? String(textarea.value || "").trim() : "";
+        if (!text) {
+          setMessage(msg, "Paste a job description first.", "error");
+          return;
+        }
+        if (!isSignedIn()) {
+          setMessage(msg, "Session missing. Please sign in again.", "error");
+          handleUnauthorized();
+          return;
+        }
+
+        saveRoleBtn.disabled = true;
+        apiJson("/api/job-applications", {
+          input_mode: JOB_MODE_DESCRIPTION,
+          job_description_text: text,
+        })
+          .then(function (r) {
+            if (r.ok && r.data.job_application_id) {
+              practiceJobApplicationId = r.data.job_application_id;
+              setMessage(msg, "Target role saved.", "ok");
+            } else {
+              setMessage(msg, (r.data && r.data.error) || "Could not save target role.", "error");
+            }
+          })
+          .catch(function () {
+            setMessage(msg, "Network error. Try again.", "error");
+          })
+          .finally(function () {
+            saveRoleBtn.disabled = false;
+          });
+      });
+    }
+
+    var startBtn = $("btn-practice-start");
+    if (startBtn) {
+      startBtn.addEventListener("click", function () {
+        startPracticeSession();
+      });
+    }
+
+    var backBtn = $("btn-back-profile-practice-setup");
+    if (backBtn) {
+      backBtn.addEventListener("click", function () {
+        showProfileView(getStoredUserEmail());
+      });
+    }
+  }
+
+  function startPracticeSession() {
+    var msg = $("practice-setup-message");
+    if (!isSignedIn() || !practiceSelectedResumeId) {
+      setMessage(msg, "Fetch and select a resume first.", "error");
+      return Promise.resolve();
+    }
+
+    setMessage(msg, "Starting practice session…", "ok");
+    return apiJson("/api/interviewer-practice/start", {
+      resume_id: practiceSelectedResumeId,
+      job_application_id: practiceJobApplicationId || "",
+    }).then(function (r) {
+      if (r.ok && r.data.session_id) {
+        showInterviewerPracticeChatView(getStoredUserEmail(), r.data.session_id);
+        applyPracticeStateToUi(r.data.state);
+        setMessage(
+          $("practice-chat-message"),
+          r.data.message || "Practice session ready. Ask your first question below.",
+          "ok"
+        );
+      } else {
+        setMessage(msg, (r.data && r.data.error) || "Could not start practice session.", "error");
+      }
+    });
+  }
+
+  function restorePracticeChatFromSessionId(sessionId) {
+    if (!sessionId || !isSignedIn()) return Promise.resolve(false);
+    return apiGet("/api/interviewer-practice/state?session_id=" + encodeURIComponent(sessionId)).then(
+      function (r) {
+        if (!r.ok) return false;
+        var state = r.data.state;
+        var record = r.data.record;
+        if (!state && record) {
+          state = {
+            session_id: sessionId,
+            messages: record.messages || [],
+            running_summary: record.interview_summary || "",
+            interview_status: record.interview_status || "active",
+            candidate_post_interview_feedback: record.interview_feedback,
+          };
+        }
+        if (!state && !record) return false;
+
+        showInterviewerPracticeChatView(getStoredUserEmail(), sessionId);
+        applyPracticeStateToUi(state);
+        return true;
+      }
+    );
+  }
+
+  function resumeLatestPausedPracticeSession() {
+    var msg = $("profile-message");
+    clearMessage(msg);
+    apiGet("/api/interviewer-practice/sessions").then(function (r) {
+      if (!r.ok) {
+        setMessage(msg, (r.data && r.data.error) || "Could not load practice sessions.", "error");
+        return;
+      }
+      var pick = pickLatestPausedInterview(r.data.interviews);
+      if (!pick || !pick.session_id) {
+        setMessage(msg, "No paused practice sessions to resume.", "error");
+        return;
+      }
+      restorePracticeChatFromSessionId(pick.session_id);
+    });
+  }
+
+  function wireInterviewerPracticeChat() {
+    var form = $("form-practice-chat");
+    if (form) {
+      form.addEventListener("submit", function (ev) {
+        ev.preventDefault();
+        var sessionId = getStoredPracticeSessionId();
+        var input = $("practice-chat-input");
+        var msg = $("practice-chat-message");
+        var text = input ? input.value.trim() : "";
+        if (!sessionId) {
+          setMessage(msg, "Session missing. Start a practice session again.", "error");
+          return;
+        }
+        if (!text) return;
+
+        clearMessage(msg);
+        var btn = form.querySelector('button[type="submit"]');
+        btn.disabled = true;
+
+        apiJson("/api/interviewer-practice/message", { session_id: sessionId, message: text })
+          .then(function (r) {
+            if (r.ok) {
+              input.value = "";
+              applyPracticeStateToUi(r.data.state);
+            } else {
+              setMessage(msg, (r.data && r.data.error) || "Message failed.", "error");
+            }
+          })
+          .catch(function () {
+            setMessage(msg, "Network error. Try again.", "error");
+          })
+          .finally(function () {
+            btn.disabled = false;
+            if (input) input.focus();
+          });
+      });
+    }
+
+    var btnEnd = $("btn-end-practice");
+    if (btnEnd) {
+      btnEnd.addEventListener("click", function () {
+        var sessionId = getStoredPracticeSessionId();
+        var msg = $("practice-chat-message");
+        if (!sessionId) {
+          setMessage(msg, "Session missing.", "error");
+          return;
+        }
+        btnEnd.disabled = true;
+        apiJson("/api/interviewer-practice/complete", { session_id: sessionId })
+          .then(function (r) {
+            if (r.ok) {
+              applyPracticeStateToUi(r.data.state);
+              setMessage(msg, r.data.message || "Practice session complete.", "ok");
+            } else {
+              setMessage(msg, (r.data && r.data.error) || "Could not complete practice session.", "error");
+            }
+          })
+          .finally(function () {
+            btnEnd.disabled = false;
+          });
+      });
+    }
+
+    var btnPause = $("btn-pause-practice");
+    if (btnPause) {
+      btnPause.addEventListener("click", function () {
+        var sessionId = getStoredPracticeSessionId();
+        var msg = $("practice-chat-message");
+        if (!sessionId) {
+          setMessage(msg, "Session missing.", "error");
+          return;
+        }
+        btnPause.disabled = true;
+        apiJson("/api/interviewer-practice/pause", { session_id: sessionId })
+          .then(function (r) {
+            if (r.ok) {
+              applyPracticeStateToUi(r.data.state);
+              setMessage(msg, r.data.message || "Practice session paused.", "ok");
+            } else {
+              setMessage(msg, (r.data && r.data.error) || "Could not pause practice session.", "error");
+            }
+          })
+          .finally(function () {
+            btnPause.disabled = false;
+          });
+      });
+    }
+
+    var btnResume = $("btn-resume-practice");
+    if (btnResume) {
+      btnResume.addEventListener("click", function () {
+        var sessionId = getStoredPracticeSessionId();
+        var msg = $("practice-chat-message");
+        if (!sessionId) {
+          setMessage(msg, "Session missing.", "error");
+          return;
+        }
+        btnResume.disabled = true;
+        apiJson("/api/interviewer-practice/resume", { session_id: sessionId })
+          .then(function (r) {
+            if (r.ok) {
+              applyPracticeStateToUi(r.data.state);
+              setMessage(msg, r.data.message || "Practice session resumed.", "ok");
+            } else {
+              setMessage(msg, (r.data && r.data.error) || "Could not resume practice session.", "error");
+            }
+          })
+          .finally(function () {
+            btnResume.disabled = false;
+          });
+      });
+    }
+
+    var btnDownload = $("btn-download-practice-report");
+    if (btnDownload) {
+      btnDownload.addEventListener("click", function () {
+        downloadPracticeReportPdf(getStoredPracticeSessionId(), $("practice-chat-message"));
+      });
+    }
+
+    var backChat = $("btn-back-profile-practice-chat");
+    if (backChat) {
+      backChat.addEventListener("click", function () {
+        showProfileView(getStoredUserEmail());
+      });
+    }
+
+    var backAfter = $("btn-back-profile-after-practice");
+    if (backAfter) {
+      backAfter.addEventListener("click", function () {
+        setStoredPracticeSessionId("");
+        showProfileView(getStoredUserEmail());
+      });
+    }
+  }
+
   function startInterviewSession() {
     var resumeId = getStoredResumeId();
     var jobAppId = getStoredJobApplicationId();
@@ -2300,6 +2922,17 @@
       var avatarBox = $("avatar-discuss-messages");
       if (avatarBox) avatarBox.textContent = "";
       hidePausedInterviewBanners();
+      practiceSelectedResumeId = "";
+      practiceJobApplicationId = "";
+      setStoredPracticeSessionId("");
+      showElement($("practice-resume-list-wrap"), false);
+      showElement($("practice-feedback-wrap"), false);
+      showElement($("btn-back-profile-after-practice"), false);
+      showElement($("btn-download-practice-report"), false);
+      var practiceReportEl = $("practice-report");
+      if (practiceReportEl) practiceReportEl.textContent = "";
+      var practiceChatBox = $("practice-chat-messages");
+      if (practiceChatBox) practiceChatBox.textContent = "";
       apiJson("/api/users/logout", {}).finally(function () {
         handleUnauthorized();
       });
@@ -2315,6 +2948,10 @@
     if (chatBtn) chatBtn.addEventListener("click", signOut);
     var avatarBtn = $("btn-sign-out-avatar");
     if (avatarBtn) avatarBtn.addEventListener("click", signOut);
+    var practiceSetupBtn = $("btn-sign-out-practice-setup");
+    if (practiceSetupBtn) practiceSetupBtn.addEventListener("click", signOut);
+    var practiceChatBtn = $("btn-sign-out-practice-chat");
+    if (practiceChatBtn) practiceChatBtn.addEventListener("click", signOut);
   }
 
   function boot() {
@@ -2332,6 +2969,8 @@
     wireJobApplication();
     wireStartInterview();
     wireInterviewChat();
+    wireInterviewerPracticeSetup();
+    wireInterviewerPracticeChat();
     wireContinuePausedInterview();
     wireSignOut();
     wireAppPicker();

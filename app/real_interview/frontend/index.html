@@ -156,6 +156,12 @@
           <button type="button" id="btn-profile-start-interview" class="btn primary">Start interview</button>
           <button type="button" id="btn-profile-resume-interview" class="btn secondary">Resume interview</button>
           <button type="button" id="btn-profile-discuss-avatar" class="btn secondary">Discuss with Avatar</button>
+          <button type="button" id="btn-profile-practice-interviewer" class="btn secondary">
+            Practice: Be the Interviewer
+          </button>
+          <button type="button" id="btn-profile-resume-practice" class="btn secondary">
+            Resume practice session
+          </button>
         </div>
 
         <div class="profile-stats" aria-label="Interview statistics">
@@ -166,6 +172,14 @@
           <button type="button" id="link-profile-paused" class="profile-stat-link">
             <span class="profile-stat-value" id="profile-count-paused">0</span>
             <span class="profile-stat-label">Interviews paused</span>
+          </button>
+          <button type="button" id="link-profile-practice-completed" class="profile-stat-link">
+            <span class="profile-stat-value" id="profile-count-practice-completed">0</span>
+            <span class="profile-stat-label">Practice sessions completed</span>
+          </button>
+          <button type="button" id="link-profile-practice-paused" class="profile-stat-link">
+            <span class="profile-stat-value" id="profile-count-practice-paused">0</span>
+            <span class="profile-stat-label">Practice sessions paused</span>
           </button>
         </div>
 
@@ -223,6 +237,23 @@
               </tr>
             </thead>
             <tbody id="profile-interviews-body"></tbody>
+          </table>
+        </div>
+
+        <div id="profile-practice-sessions-wrap" class="profile-interviews-wrap is-hidden" hidden>
+          <h3 id="profile-practice-sessions-heading">Practice sessions</h3>
+          <table id="profile-practice-sessions-table" class="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Role</th>
+                <th scope="col">Started</th>
+                <th scope="col">Paused</th>
+                <th scope="col">Status</th>
+                <th scope="col">Messages</th>
+                <th scope="col" class="profile-interviews-report-col" title="Practice report">Report</th>
+              </tr>
+            </thead>
+            <tbody id="profile-practice-sessions-body"></tbody>
           </table>
         </div>
 
@@ -458,6 +489,117 @@
               Download PDF
             </button>
             <button type="button" id="btn-back-profile-after-interview" class="btn primary is-hidden" hidden>
+              Back to profile
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section
+        id="view-interviewer-practice-setup"
+        class="card is-hidden"
+        aria-labelledby="practice-setup-heading"
+        hidden
+      >
+        <h2 id="practice-setup-heading">Practice: Be the Interviewer</h2>
+        <p class="signed-in">
+          Signed in as <code id="display-user-email-practice-setup"></code>
+          <button type="button" id="btn-back-profile-practice-setup" class="btn link">Back to profile</button>
+          <button type="button" id="btn-sign-out-practice-setup" class="btn link">Sign out</button>
+        </p>
+        <p class="hint">
+          Pick one of your resumes — your Candidate Avatar will play that candidate, grounded in it. You play the
+          interviewer and ask the questions.
+        </p>
+        <div class="upload-actions">
+          <button type="button" id="btn-practice-fetch-resume" class="btn secondary">Fetch resumes</button>
+        </div>
+        <div id="practice-resume-list-wrap" class="resume-list-wrap is-hidden" hidden aria-live="polite">
+          <table id="practice-resume-table" class="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Date</th>
+                <th scope="col">Resume</th>
+              </tr>
+            </thead>
+            <tbody id="practice-resume-table-body"></tbody>
+          </table>
+        </div>
+        <div class="profile-ideal-answers-setting">
+          <label class="profile-toggle" for="practice-target-role-toggle">
+            <input type="checkbox" id="practice-target-role-toggle" />
+            Target a specific role (optional)
+          </label>
+        </div>
+        <div id="practice-role-target-wrap" class="stack is-hidden" hidden>
+          <label>
+            Job description
+            <textarea
+              id="practice-job-description"
+              rows="8"
+              placeholder="Paste the job description here…"
+            ></textarea>
+          </label>
+          <button type="button" id="btn-practice-save-role-target" class="btn secondary">
+            Save target role
+          </button>
+        </div>
+        <button type="button" id="btn-practice-start" class="btn primary">Start practice session</button>
+        <p id="practice-setup-message" class="message" role="status" aria-live="polite"></p>
+      </section>
+
+      <section
+        id="view-interviewer-practice-chat"
+        class="card is-hidden"
+        aria-labelledby="practice-chat-heading"
+        hidden
+      >
+        <h2 id="practice-chat-heading">Practice interview</h2>
+        <p class="signed-in">
+          Signed in as <code id="display-user-email-practice-chat"></code>
+          <span class="session-label">Session <code id="display-practice-session-id"></code></span>
+          <button type="button" id="btn-back-profile-practice-chat" class="btn link">Back to profile</button>
+          <button type="button" id="btn-sign-out-practice-chat" class="btn link">Sign out</button>
+        </p>
+        <p class="hint">
+          You are the interviewer. Ask questions; your Candidate Avatar answers in character. Click End session
+          when you are done for a report.
+        </p>
+        <div
+          id="practice-chat-messages"
+          class="chat-messages"
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions"
+        ></div>
+        <form id="form-practice-chat" class="chat-form" novalidate>
+          <label class="sr-only" for="practice-chat-input">Your question</label>
+          <input
+            id="practice-chat-input"
+            type="text"
+            name="message"
+            placeholder="Ask a question…"
+            autocomplete="off"
+            required
+          />
+          <button type="submit" class="btn primary">Send</button>
+        </form>
+        <div class="chat-actions">
+          <button type="button" id="btn-pause-practice" class="btn secondary">Pause session</button>
+          <button type="button" id="btn-resume-practice" class="btn secondary is-hidden" hidden>
+            Resume session
+          </button>
+          <button type="button" id="btn-end-practice" class="btn secondary">End session</button>
+        </div>
+        <p id="practice-chat-message" class="message" role="status" aria-live="polite"></p>
+        <div id="practice-feedback-wrap" class="interview-feedback-wrap is-hidden" hidden>
+          <h3>Practice report</h3>
+          <article id="practice-report" class="interview-report" aria-live="polite"></article>
+          <div class="interview-report-actions">
+            <button type="button" id="btn-download-practice-report" class="btn secondary is-hidden" hidden>
+              Download PDF
+            </button>
+            <button type="button" id="btn-back-profile-after-practice" class="btn primary is-hidden" hidden>
               Back to profile
             </button>
           </div>

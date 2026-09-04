@@ -23,6 +23,11 @@ _DEFAULT_INTERVIEW: Dict[str, Any] = {
         "max_questions_per_interviewer": 8,
         "max_candidate_qa_turns": 2,
     },
+    "interviewer_practice": {
+        "limits": {
+            "max_questions_soft_cap": 12,
+        },
+    },
 }
 
 
@@ -83,3 +88,10 @@ def get_question_bank_config() -> Dict[str, Any]:
 
 def get_interview_limits_config() -> Dict[str, Any]:
     return get_interview_config().get("limits", _DEFAULT_INTERVIEW["limits"])
+
+
+def get_interviewer_practice_limits_config() -> Dict[str, Any]:
+    practice = get_interview_config().get(
+        "interviewer_practice", _DEFAULT_INTERVIEW["interviewer_practice"]
+    )
+    return practice.get("limits", _DEFAULT_INTERVIEW["interviewer_practice"]["limits"])

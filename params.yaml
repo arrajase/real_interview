@@ -21,3 +21,7 @@ interview:
     max_questions_per_interviewer: 8
     # Max candidate-question / panel-answer rounds after the panel invites questions.
     max_candidate_qa_turns: 2
+  interviewer_practice:
+    limits:
+      # UI hint only ("~N questions is typical") — never blocks sending another message.
+      max_questions_soft_cap: 12

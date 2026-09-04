@@ -17,7 +17,11 @@ from app.real_interview.backend.services.user_maintenance import (
     login_user,
     sign_up_user,
 )
-from app.real_interview.backend.services.user_profile_service import get_user_profile, list_profile_interviews
+from app.real_interview.backend.services.user_profile_service import (
+    get_user_profile,
+    list_profile_interviews,
+    list_profile_practice_sessions,
+)
 from app.real_interview.backend.services.user_interview_preferences import update_interview_settings
 
 user_maintenance_blueprint = Blueprint("user_maintenance", __name__, url_prefix="/api")
@@ -86,6 +90,25 @@ def user_profile_interviews_route():
     )
     try:
         result = list_profile_interviews(customer_id=g.current_user_id, kind=kind)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    status_code = int(result.pop("status_code", 200))
+    return jsonify(result), status_code
+
+
+@user_maintenance_blueprint.route("/users/profile/interviewer-practice-sessions", methods=["GET"])
+@require_auth
+def user_profile_practice_sessions_route():
+    kind = (request.args.get("status") or request.args.get("kind") or "").strip().lower()
+    if kind not in ("completed", "paused"):
+        return jsonify({"error": "status must be completed or paused"}), 400
+    logger.info(
+        "[user_maintenance][GET /api/users/profile/interviewer-practice-sessions] user_id=%s status=%s",
+        g.current_user_id,
+        kind,
+    )
+    try:
+        result = list_profile_practice_sessions(customer_id=g.current_user_id, kind=kind)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     status_code = int(result.pop("status_code", 200))

@@ -9,6 +9,21 @@ Flask application that guides a candidate from account setup through resume uplo
 
 Local development: `http://localhost:5000` (app), `http://localhost:5000/admin` (admin), `http://localhost:5000/feedback` (feedback), and `http://localhost:5000/trapdrills` (Trap Drills).
 
+## Demo account
+
+For quick demos/screenshots without uploading files by hand, seed a demo account with one resume per role (Backend Engineering, Frontend Engineering, Data Science/ML, DevOps/SRE, Product Management, Agile/Scrum):
+
+```bash
+python -m app.real_interview.backend.scripts.seed_demo_user
+```
+
+Safe to re-run — reuses the account and skips any resume already uploaded.
+
+| | |
+|---|---|
+| Email | `demo.candidate@realinterview.dev` |
+| Password | `DemoPass123!` |
+
 ## 🎯 Vision
 Build an Agentic AI platform for interview preparation. **Real Interview** simulates mock interviews grounded in a candidate's resume and job description; **Interview Trap Drills** complements it with spaced-repetition drilling on role-specific "trick" interview questions, personalized from your own completed interviews. Both apps share one login, one server, and one codebase.  
 Initial form: **chat-based app** → extended with analytics, personalization, and now a second practice app on the same platform.
@@ -66,6 +81,7 @@ params.yaml                     # Interview limits, summarizer/feedback threshol
 - Chat interview simulation with configurable questions-per-interviewer (app default + per-user override).
 - Post-interview report (structured feedback + PDF download).
 - **Candidate Avatar** — ideal interview answers grounded in the resume (report + live **Discuss with Avatar** chat).
+- **Practice: Be the Interviewer** — role-reversed practice mode: you interview your own Candidate Avatar and get a structured report evaluating it, same format as a real interview report.
 - User profile — interview stats, paused/completed history, resume management, interview settings.
 - Website feedback page — visitors email suggestions and bug reports to the site owner.
 - Admin dashboard for signups and usage metrics (active accounts only).
@@ -196,7 +212,7 @@ Do **not** set `ALLOW_INSECURE_JWT_DEV` on a public host.
 ### MongoDB Atlas checklist
 
 - Allow network access from your host (see **Network access error** below).
-- Reuse the same database; collections are created on first use (`interview_question_bank`, `checkpoints`, `rate_limits`, etc.).
+- Reuse the same database; collections are created on first use (`interview_question_bank`, `interviewer_practice_sessions`, `checkpoints`, `rate_limits`, etc.).
 - GridFS bucket `resume_pdf_fs` stores uploaded PDFs.
 
 ### Network access error (Render / Atlas)
@@ -231,7 +247,8 @@ Copy `MONGODB_URI` from your local `.env` exactly (no leading/trailing spaces).
 4. Pause and resume — summary should carry over.
 5. End interview — interview report appears with **Download PDF**; completed row on profile shows a download icon for the report.
 6. Profile → **Discuss with Avatar** — ask a practice question; confirm the avatar replies using resume context.
-7. Open **Send feedback** (footer link or `/feedback`) — confirm the message arrives in your inbox.
+7. Profile → **Practice: Be the Interviewer** — pick a resume, start a session, ask a question, then **End session**; confirm the report renders and **Download PDF** works.
+8. Open **Send feedback** (footer link or `/feedback`) — confirm the message arrives in your inbox.
 
 ### Open the UI
 
@@ -254,8 +271,9 @@ Use port **5000** unless you set `PORT` to something else in `.env`.
 7. **End interview** when ready — structured **interview report** with PDF download; **Back to profile** returns to your dashboard
 8. **Profile** — view completed/paused counts, download past resumes and summary reports, upload new resumes
 9. **Discuss with Avatar** — practice any interview question; ideal avatar answers from your resume (optional web sources)
-10. **Send feedback** (footer link) — report bugs or ideas about the site itself
-11. **Sign out** clears the browser session
+10. **Practice: Be the Interviewer** — pick a resume (optionally target a role), then interview your own Candidate Avatar; pause/resume/end like a real interview, and get a structured report evaluating the avatar's performance
+11. **Send feedback** (footer link) — report bugs or ideas about the site itself
+12. **Sign out** clears the browser session
 
 ---
 
@@ -267,9 +285,9 @@ After login or signup, candidates land on **Your profile** (`/` → profile view
 
 | Area | Description |
 |------|-------------|
-| **Actions** | **Start interview**, **Resume interview** (latest paused), **Discuss with Avatar** |
-| **Stats** | Clickable counts for completed and paused interviews |
-| **Interview tables** | Role, dates, status, message count; completed rows include a download icon for the PDF summary report |
+| **Actions** | **Start interview**, **Resume interview** (latest paused), **Discuss with Avatar**, **Practice: Be the Interviewer**, **Resume practice session** (latest paused) |
+| **Stats** | Clickable counts for completed and paused interviews, and separately for practice sessions |
+| **Interview tables** | Role, dates, status, message count; completed rows include a download icon for the PDF summary report. Practice sessions have their own table in the same shape. |
 | **Interview settings** | Override `max_questions_per_interviewer` (minimum **4**); toggle **ideal answers in reports** |
 | **Resumes** | Upload PDF/DOC/DOCX; list saved files with **Download saved resume** |
 
@@ -288,8 +306,9 @@ Use **Use app default** on the profile to clear a personal override.
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET /api/users/profile` | Email, interview counts, interview settings (`default`, `override`, `effective`, `minimum`) |
+| `GET /api/users/profile` | Email, interview counts, **interviewer-practice counts**, interview settings (`default`, `override`, `effective`, `minimum`) |
 | `GET /api/users/profile/interviews?status=completed\|paused` | Interview list for profile tables |
+| `GET /api/users/profile/interviewer-practice-sessions?status=completed\|paused` | Practice session list for the profile table (same shape as interviews) |
 | `PUT /api/users/profile/interview-settings` | Body: `{ "max_questions_per_interviewer": 6 }`, `{ "ideal_answer_report_enabled": true }`, or either field alone |
 | `GET /api/resumes` | List saved resumes (includes `downloadable` flag) |
 | `GET /api/resumes/<resume_id>/download` | Download original uploaded file (GridFS) |
@@ -545,6 +564,40 @@ PUT /api/users/profile/interview-settings
 Set `"ideal_answer_report_enabled": false` to disable ideal answers in reports. Re-enabling clears cached ideal-answer reports so completed sessions regenerate on the next download.
 
 Optional env: `AVATAR_MAX_TOOL_ROUNDS` (default `4`) — max Tavily search rounds per avatar request.
+
+---
+
+## Practice: Be the Interviewer
+
+Reverses the usual mock-interview roles: **you** play the interviewer, and your own **Candidate Avatar** (see [Candidate Avatar](#candidate-avatar)) plays the candidate, grounded in a resume you pick. It's a full session — pause, resume, and end like a real interview — not a one-off Q&A like Discuss with Avatar. Ending the session produces a structured report evaluating the **avatar's** performance, using the exact same feedback shape (`overall_assessment`, `strengths`, `areas_to_improve`, `recommendation`, `interview_decision`) as a real interview report — this is deliberate: the report reviews the candidate side, not your interviewing technique, so you can see how a strong candidate reads against your own questions.
+
+### How it works
+
+1. Profile → **Practice: Be the Interviewer** → pick one of your resumes.
+2. Optionally check **Target a specific role** and paste a job description — saved via the existing job-application flow — so the avatar's answers and the report's role label reflect that target. Skip it for a general-purpose practice session (role is inferred from the resume's most recent title).
+3. **Start practice session** — the avatar opens with a short greeting; you ask the first question.
+4. Chat turn by turn. **Pause session** any time (summarized like a real interview); **Resume practice session** from the profile picks up the latest paused one.
+5. **End session** — generates the report; **Download PDF** and **Back to profile** appear, same as a completed interview.
+
+Unlike the candidate-side interview, there's no panel, no interviewer styles, and no question-limit state machine — it's a single persona, and ending is always an explicit action (never auto-triggered).
+
+### Data model
+
+Own MongoDB collection, `interviewer_practice_sessions` (env var `MONGODB_COLLECTION_INTERVIEWER_PRACTICE`), field-compatible with the `interview` collection (`role_applied_for`, `interview_status`, `interview_summary`, `interview_feedback`, `messages`) so report rendering and PDF generation are shared code, not a duplicate. Deleting your account removes in-progress practice sessions and their LangGraph checkpoints; **completed** practice sessions are retained, same policy as completed interviews.
+
+### API (JWT cookie required)
+
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /api/interviewer-practice/start` | Body: `{ "resume_id", "job_application_id"? }` — `job_application_id` optional |
+| `POST /api/interviewer-practice/message` | Body: `{ "session_id", "message" }` — your question; avatar replies in state |
+| `POST /api/interviewer-practice/pause` | Summarizes and pauses |
+| `POST /api/interviewer-practice/resume` | Resumes a paused session |
+| `POST /api/interviewer-practice/complete` | Ends the session and generates the report |
+| `GET /api/interviewer-practice/report?session_id=…` | Structured report JSON (same shape as `/api/interview/report`, minus ideal answers) |
+| `GET /api/interviewer-practice/report/download?session_id=…` | PDF download |
+| `GET /api/interviewer-practice/sessions` | Paused/in-progress sessions (for **Resume practice session**) |
+| `GET /api/interviewer-practice/state?session_id=…` | Read-only current state |
 
 ---
 

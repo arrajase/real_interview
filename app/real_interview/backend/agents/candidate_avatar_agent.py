@@ -279,3 +279,56 @@ class CandidateAvatarAgent:
                 ideal_answer="I could not generate an answer right now. Please try again.",
                 web_sources=[],
             ).model_dump()
+
+    def answer_as_candidate(
+        self,
+        *,
+        parsed_data: Dict[str, Any],
+        job_role: str = "",
+        job_description: str = "",
+        messages: List[BaseMessage],
+    ) -> AIMessage:
+        """
+        Live multi-turn candidate persona for "Practice: Be the Interviewer" —
+        the user (interviewer) asks questions, this answers in character.
+        """
+        question = ""
+        for msg in reversed(messages):
+            if isinstance(msg, HumanMessage) and isinstance(msg.content, str) and msg.content.strip():
+                question = msg.content.strip()
+                break
+        if not question:
+            return AIMessage(content="Could you repeat the question?")
+
+        logger.info("[CandidateAvatarAgent] answer_as_candidate chars=%s", len(question))
+        research = self._run_tool_research_for_question(
+            parsed_data=parsed_data,
+            job_role=job_role,
+            question=question,
+        )
+
+        system = SystemMessage(
+            content=(
+                "You are the IDEAL avatar of this candidate — grounded in their resume and experience. "
+                "You are being interviewed live by the user, who is playing the interviewer. Respond in "
+                "first person as the candidate, be specific and structured, stay honest about limits, and "
+                "do not invent employers or degrees. Do not break character or mention that you are an AI."
+            )
+        )
+        context = SystemMessage(
+            content=(
+                f"Target role: {job_role or '(general interview practice)'}\n\n"
+                f"Job description:\n{(job_description or '(not provided)')[:8000]}\n\n"
+                f"Resume:\n{format_parsed_resume(parsed_data)}\n\n"
+                f"Web research:\n{research or '(none)'}"
+            )
+        )
+        llm = self._llm_wrapper.get_llm_model()
+        try:
+            response = llm.invoke([system, context, *messages[-12:]])
+            content = response.content if isinstance(response.content, str) else str(response.content)
+            logger.info("[CandidateAvatarAgent] answer_as_candidate reply chars=%s", len(content))
+            return AIMessage(content=content)
+        except Exception:
+            logger.exception("[CandidateAvatarAgent] answer_as_candidate failed")
+            return AIMessage(content="I could not generate an answer right now. Please try again.")

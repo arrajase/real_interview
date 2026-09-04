@@ -169,3 +169,17 @@ def interview_session_owned_by(session_id: str, user_id: str) -> bool:
     if not record:
         return False
     return (record.get("candidate_id") or "") == user_id
+
+
+def interviewer_practice_session_owned_by(session_id: str, user_id: str) -> bool:
+    if not session_id or not user_id:
+        return False
+    prefix = f"{user_id}:"
+    if session_id.startswith(prefix):
+        return True
+    from app.real_interview.backend.services import interviewer_practice_record as practice_db
+
+    record = practice_db.get_practice_session_by_id(session_id)
+    if not record:
+        return False
+    return (record.get("user_id") or "") == user_id

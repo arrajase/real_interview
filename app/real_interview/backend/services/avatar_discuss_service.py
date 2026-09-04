@@ -2,6 +2,7 @@ from typing import Any, Dict, List
 
 from app.real_interview import logger
 from app.real_interview.backend.agents.candidate_avatar_agent import CandidateAvatarAgent
+from app.real_interview.backend.agents.interview_context import infer_role_from_parsed_data
 from app.real_interview.backend.services.pdfreader import resume_reader
 
 
@@ -27,13 +28,7 @@ def get_avatar_discuss_context(*, customer_id: str) -> Dict[str, Any]:
         parsed = resume.get("parsed_data") or {}
         name = (parsed.get("name") or "").strip() if isinstance(parsed, dict) else ""
         label = resume.get("label") or resumes[0].get("label") or "Resume"
-        role = ""
-        if isinstance(parsed, dict):
-            roles = parsed.get("roles") or parsed.get("experience") or []
-            if isinstance(roles, list) and roles:
-                first = roles[0]
-                if isinstance(first, dict):
-                    role = (first.get("title") or first.get("role") or "").strip()
+        role = infer_role_from_parsed_data(parsed)
         return {
             "status_code": 200,
             "ready": True,
@@ -76,14 +71,7 @@ def discuss_with_avatar(
         chosen_id = (resume_id or "").strip() or _latest_resume_id(resumes)
         resume = reader.get_resume_for_user(customer_id, chosen_id)
         parsed_data = resume.get("parsed_data") or {}
-
-        role = ""
-        if isinstance(parsed_data, dict):
-            roles = parsed_data.get("roles") or parsed_data.get("experience") or []
-            if isinstance(roles, list) and roles:
-                first = roles[0]
-                if isinstance(first, dict):
-                    role = (first.get("title") or first.get("role") or "").strip()
+        role = infer_role_from_parsed_data(parsed_data)
 
         agent = CandidateAvatarAgent()
         answer = agent.answer_interview_question(
