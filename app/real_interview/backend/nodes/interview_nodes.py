@@ -16,6 +16,7 @@ from app.real_interview.backend.services.interview_closing import (
     ask_candidate_questions_message,
     candidate_asked_question,
     candidate_declined_questions,
+    candidate_requested_clarification,
     counts_for_state,
     counts_from_state,
     increment_interviewer_question_count,
@@ -43,6 +44,20 @@ def _estimate_tokens(messages: list) -> int:
 
 def _summarizer_threshold() -> int:
     return int(get_summarizer_config().get("token_threshold", 1500))
+
+
+_INTERVIEWER_LABEL = re.compile(r"^\[I(\d+)\]:", re.IGNORECASE)
+
+
+def _last_questioner_index(messages: list, panel_size: int) -> int | None:
+    """0-based index of the panelist who sent the most recent interviewer message."""
+    for msg in reversed(messages):
+        if isinstance(msg, AIMessage) and isinstance(msg.content, str):
+            match = _INTERVIEWER_LABEL.match(msg.content.strip())
+            if match:
+                idx = int(match.group(1)) - 1
+                return idx if 0 <= idx < panel_size else None
+    return None
 
 
 def _interviewer_code(interviewer_index: int) -> str:
@@ -213,6 +228,7 @@ def _run_panel_speakers(
     *,
     opening: bool,
     question_counts: dict[int, int] | None = None,
+    turn_mode: str = "technical",
 ) -> Dict[str, Any]:
     plan = state.get("panel_plan") or {}
     selected = plan.get("selected_interviewers") or []
@@ -230,10 +246,20 @@ def _run_panel_speakers(
     asked = list(state.get("asked_question_hashes") or [])
     out_messages: list[AIMessage] = []
 
-    for order, idx in enumerate(speaker_indices):
+    # Opening: the lead (first index) speaks last, so the candidate's screen ends on the
+    # lead's question rather than on a co-panelist's intro.
+    lead_idx = speaker_indices[0] if speaker_indices else None
+    run_order = list(speaker_indices)
+    if opening and len(run_order) > 1:
+        run_order = run_order[1:] + [lead_idx]
+
+    for idx in run_order:
+        is_lead = idx == lead_idx
+        is_intro_only = opening and not is_lead
+        is_clarification = turn_mode == "clarification"
         if idx >= len(selected):
             continue
-        if not opening and counts.get(idx, 0) >= limit:
+        if not opening and not is_clarification and counts.get(idx, 0) >= limit:
             continue
         interviewer_type = selected[idx]
         local_state: InterviewPipelineState = {**state, "asked_question_hashes": asked}
@@ -248,7 +274,7 @@ def _run_panel_speakers(
                 question_bank_seeds=bank_seeds,
                 panel_plan=plan,
                 interviewer_index=idx,
-                is_lead=(order == 0),
+                is_lead=is_lead,
                 prior_messages=base_messages + turn_messages,
             )
         else:
@@ -262,13 +288,17 @@ def _run_panel_speakers(
                 question_bank_seeds=bank_seeds,
                 panel_plan=plan,
                 interviewer_index=idx,
+                turn_mode=turn_mode,
             )
 
         if isinstance(reply.content, str):
             reply.content = _prefix_interviewer_message(reply.content, idx)
-            if _message_counts_as_question(reply.content):
-                counts = increment_interviewer_question_count(counts, panel_size, idx)
-            asked = _track_asked_question(reply.content, asked)
+            # A co-panelist's opening intro or a rephrase of the same question is not a new
+            # question: don't spend the panelist's quota on it.
+            if not is_intro_only and not is_clarification:
+                if _message_counts_as_question(reply.content):
+                    counts = increment_interviewer_question_count(counts, panel_size, idx)
+                asked = _track_asked_question(reply.content, asked)
         turn_messages.append(reply)
         out_messages.append(reply)
 
@@ -396,6 +426,18 @@ def panel_turn_node(state: InterviewPipelineState) -> Dict[str, Any]:
         if qa_turns >= max_candidate_qa_turns():
             return _finish_interview(state, counts)
         return _run_candidate_qa_turn(state, counts)
+
+    # Checked before the question limit: if the candidate asks to rephrase the final
+    # question, they still deserve the rephrase before the wrap-up.
+    if candidate_requested_clarification(last_human):
+        asker = _last_questioner_index(list(state.get("messages") or []), panel_size)
+        if asker is not None:
+            logger.info("[interview_nodes] candidate asked for clarification; I%s rephrases", asker + 1)
+            result = _run_panel_speakers(
+                state, [asker], opening=False, question_counts=counts, turn_mode="clarification"
+            )
+            result["interview_phase"] = "active"
+            return result
 
     if all_panelists_at_question_limit(counts, panel_size, limit=_question_limit(state)):
         logger.info("[interview_nodes] all panelists reached question limit; inviting candidate questions")

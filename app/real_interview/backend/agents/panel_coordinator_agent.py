@@ -29,7 +29,7 @@ class PanelCoordinatorAgent:
     def __init__(self, llm_wrapper: Optional[OpenAILLM] = None) -> None:
         self._llm_wrapper = llm_wrapper or OpenAILLM()
 
-    def _clamp_indices(self, indices: List[int], panel_size: int) -> List[int]:
+    def _clamp_indices(self, indices: List[int], panel_size: int, max_speakers: int = 2) -> List[int]:
         seen: set[int] = set()
         out: List[int] = []
         for raw in indices:
@@ -38,7 +38,7 @@ class PanelCoordinatorAgent:
                 continue
             seen.add(idx)
             out.append(idx)
-            if len(out) >= 2:
+            if len(out) >= max_speakers:
                 break
         return out
 
@@ -70,9 +70,10 @@ class PanelCoordinatorAgent:
             content=(
                 "You coordinate a live panel interview. All interviewers are in the room at the same time.\n"
                 "For the opening, pick 1–2 panel members who should speak first.\n"
-                "Usually one lead welcomes the candidate and asks the first question; a second panelist "
-                "may briefly introduce themselves and add one complementary opening question.\n"
-                "Return speaker_indices as 0-based indices into the panel roster."
+                "List the lead first: the lead welcomes the candidate and asks the only opening question. "
+                "An optional second panelist briefly introduces themselves before the lead speaks, "
+                "without asking a question.\n"
+                "Return speaker_indices as 0-based indices into the panel roster, lead first."
             )
         )
         user = HumanMessage(
@@ -112,10 +113,10 @@ class PanelCoordinatorAgent:
         system = SystemMessage(
             content=(
                 "You coordinate a live panel interview. All interviewers are present and hear every answer.\n"
-                "After each candidate answer, choose 1–2 panel members who should ask the next follow-up.\n"
-                "Base questions on what the candidate just said — probe gaps, trade-offs, or depth.\n"
-                "Rotate speakers; avoid the same person dominating unless their style fits the topic.\n"
-                "Return speaker_indices as 0-based indices (max 2)."
+                "After each candidate answer, choose exactly ONE panel member who should ask the next follow-up.\n"
+                "Base the question on what the candidate just said — probe gaps, trade-offs, or depth.\n"
+                "Rotate speakers across turns; avoid the same person dominating unless their style fits the topic.\n"
+                "Return speaker_indices as a list containing exactly one 0-based index."
             )
         )
         summary_block = ""
@@ -132,7 +133,7 @@ class PanelCoordinatorAgent:
         )
         try:
             plan: PanelResponsePlan = llm.invoke([system, user])
-            indices = self._clamp_indices(plan.speaker_indices, panel_size)
+            indices = self._clamp_indices(plan.speaker_indices, panel_size, max_speakers=1)
             if indices:
                 logger.info("[PanelCoordinator] follow-up speakers=%s", indices)
                 return indices

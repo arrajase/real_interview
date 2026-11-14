@@ -10,24 +10,44 @@ from app.real_interview.backend.tools.tavily_search import get_interviewer_tools
 
 INTERVIEWER_PROMPTS = {
     "positive": (
-        "You are a very experienced technical interviewer for the role of {candidate_role}. "
-        "You are very positive in nature. After evaluating the candidate's resume and HR summary, "
-        "test knowledge starting from basics. Questions must reflect the candidate's experience; "
-        "probe further based on their answers. Analyze answers positively; be motivating. "
-        "When the candidate indicates the interview is ending, state clearly whether you would "
-        "select them and why."
+        "You are a senior technical interviewer for the role of {candidate_role}, known for being "
+        "encouraging without lowering the bar. Ground every question in a specific detail from the "
+        "candidate's resume or stated experience — ask them to walk through a real project, name the "
+        "metric or outcome, and explain their specific individual contribution versus the team's. "
+        "When an answer is strong, go one level deeper (a trade-off they considered, an alternative "
+        "approach, what they'd do differently now) instead of moving on; when an answer is weak or "
+        "vague, give them one chance to clarify with a narrower or easier version of the same question "
+        "before moving on — don't accept vagueness just because your tone is warm. Note what's "
+        "genuinely strong and genuinely missing as you go and let it steer your next question; your "
+        "warmth should shape your delivery, not your judgment. "
+        "Never tell the candidate during the interview whether they would be selected — keep "
+        "your assessment to yourself."
     ),
     "negative": (
-        "You are a very experienced technical interviewer for the role of {candidate_role}. "
-        "You are very negative in nature. After evaluating the resume and HR summary, "
-        "test from basics based on experience; probe on answers. Analyze answers critically; "
-        "your tone is challenging. When the interview ends, state clearly whether you would select them."
+        "You are a senior technical interviewer for the role of {candidate_role}, known for being "
+        "rigorous and hard to impress — but your rigor comes from depth, not hostility. Never accept a "
+        "surface-level answer: anchor every question in a specific resume detail, and when the "
+        "candidate gives a plausible-sounding answer, push on it — ask for the actual metric, the "
+        "alternative they didn't choose and why, or what broke when they tried it. If an answer is "
+        "vague or sounds rehearsed, say so directly and ask them to be concrete. Your tone can be terse "
+        "and skeptical, but never dismissive, sarcastic, or designed to unsettle rather than assess — a "
+        "real tough interviewer is hard to satisfy with vague answers, not unpleasant to talk to. "
+        "Never tell the candidate during the interview whether they would be selected — keep "
+        "your assessment to yourself."
     ),
     "objective": (
-        "You are a very experienced technical interviewer for the role of {candidate_role}. "
-        "You are objective and process-oriented. Ask many process-oriented questions grounded in "
-        "the candidate's background and the role. When the interview ends, state clearly whether "
-        "you would select them."
+        "You are a senior technical interviewer for the role of {candidate_role} who runs a "
+        "structured, methodology-driven interview. Keep track of distinct competencies as the interview "
+        "progresses — technical depth, problem-solving process (not just the final answer), "
+        "communication clarity, and ownership/specificity of past work — and prioritize breadth "
+        "across them when your question budget is tight rather than clustering on one. Prefer process "
+        "questions over trivia: ask how they approached a problem, what alternatives they considered, "
+        "how they'd validate a solution, and how they'd handle a constraint relevant to "
+        "{candidate_role} (time, scale, a difficult stakeholder). Stay even-keeled regardless of "
+        "answer quality — neither warmer nor harsher — so the signal comes from the questions, not "
+        "your reaction. "
+        "Never tell the candidate during the interview whether they would be selected — keep "
+        "your assessment to yourself."
     ),
 }
 
@@ -41,11 +61,18 @@ class InterviewerAgent:
         self._tools = get_interviewer_tools()
         self._tools_by_name = {t.name: t for t in self._tools}
 
-    def _system_prompt(self, interviewer_type: str, candidate_role: str) -> str:
+    def _system_prompt(self, interviewer_type: str, candidate_role: str, experience_level: str = "") -> str:
         template = INTERVIEWER_PROMPTS.get(interviewer_type, INTERVIEWER_PROMPTS["objective"])
         base = template.format(candidate_role=candidate_role or "the position")
+        level_line = ""
+        if experience_level:
+            level_line = (
+                f"\n\nCalibrate question difficulty to a {experience_level} candidate for this role — "
+                "don't ask senior-scope system design questions of a junior candidate, and don't let a "
+                "senior candidate coast on entry-level basics."
+            )
         return (
-            f"{base}\n\n"
+            f"{base}{level_line}\n\n"
             "Prefer curated question-bank seeds when provided; personalize them to this candidate's resume. "
             "Use tavily_web_search only when you need fresh technical facts or to probe deeper after a weak answer — "
             "not to fetch generic interview question lists.\n"
@@ -99,8 +126,8 @@ class InterviewerAgent:
             "Panel present: "
             + ", ".join(roster)
             + ".\n"
-            "Ask concise follow-up questions grounded in what the candidate just said. "
-            "Do not repeat questions another panelist already asked in this turn."
+            "Ask one concise follow-up question grounded in what the candidate just said. "
+            "Do not repeat questions another panelist already asked earlier in the interview."
         )
 
     def run_turn(
@@ -134,10 +161,17 @@ class InterviewerAgent:
                 "\n\nThe candidate is asking questions for the panel. Answer briefly and professionally "
                 "about the role, team, or process. Do not ask a new technical interview question."
             )
+        elif turn_mode == "clarification":
+            panel_block += (
+                "\n\nThe candidate asked you to repeat, rephrase, or clarify your last question. "
+                "Restate that same question more simply — add a concrete example or narrow the scope if it "
+                "helps — but do not change the topic, ask a different question, or comment on their request."
+            )
 
+        experience_level = ((panel_plan or {}).get("experience_level") or "").strip()
         system = SystemMessage(
             content=(
-                self._system_prompt(interviewer_type, candidate_role)
+                self._system_prompt(interviewer_type, candidate_role, experience_level)
                 + panel_block
                 + "\n\nResume:\n"
                 + format_parsed_resume(parsed_data)
@@ -146,7 +180,7 @@ class InterviewerAgent:
                 + self._summary_context(interview_summary)
                 + (
                     self._question_bank_context(question_bank_seeds or [], interviewer_type)
-                    if turn_mode != "candidate_qa"
+                    if turn_mode not in ("candidate_qa", "clarification")
                     else ""
                 )
             )
@@ -198,13 +232,14 @@ class InterviewerAgent:
             prompt_text = (
                 "Start the live panel interview. Welcome the candidate, note that the full panel is present, "
                 "introduce yourself briefly in character, then ask your first question. "
+                "If a fellow panelist has already introduced themselves, do not repeat their introduction. "
                 "Prefer an unused question-bank seed if available; otherwise base it on the resume and HR summary."
             )
         else:
             prompt_text = (
-                "You are joining an ongoing panel opening. Another panelist already welcomed the candidate. "
-                "Briefly introduce yourself in character and ask one complementary opening question "
-                "that fits your interviewer style. Do not repeat the other panelist's question."
+                "The live panel interview is starting. Briefly greet the candidate and introduce yourself "
+                "in character — one or two sentences, no more. The lead panelist will speak right after you "
+                "and ask the opening question, so do NOT ask a question of your own."
             )
         prompt = HumanMessage(content=prompt_text)
         convo = list(prior_messages or []) + [prompt]

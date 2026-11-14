@@ -3,6 +3,8 @@
 import re
 from typing import Any, Dict, List
 
+from app.real_interview import logger
+from app.real_interview.backend.services.interview_closing import candidate_requested_clarification
 from app.real_interview.backend.services.question_bank import extract_question_from_message
 
 _SKIP_PHRASES = (
@@ -48,8 +50,9 @@ def extract_interview_qa_pairs(messages: List[Dict[str, Any]]) -> List[Dict[str,
     """
     Pair each technical interviewer question with the candidate's next reply.
 
-    When multiple interviewers ask before one candidate answer, each question
-    receives the same candidate_answer.
+    The panel asks one question per turn, so each answer is paired with the most
+    recent pending interviewer message. At the opening a co-panelist's intro may
+    precede the lead's question; that intro is dropped rather than paired.
     """
     pairs: List[Dict[str, str]] = []
     pending: List[Dict[str, str]] = []
@@ -74,14 +77,24 @@ def extract_interview_qa_pairs(messages: List[Dict[str, Any]]) -> List[Dict[str,
             continue
 
         if role == "user" and pending:
-            for item in pending:
-                pairs.append(
-                    {
-                        "interviewer": item["interviewer"],
-                        "question": item["question"],
-                        "candidate_answer": content,
-                    }
+            if candidate_requested_clarification(content):
+                # Not an answer; the interviewer's rephrase that follows replaces the question.
+                pending = []
+                continue
+            if sum(1 for item in pending if "?" in item["question"]) > 1:
+                logger.warning(
+                    "[interview_qa_extract] %d pending questions before one answer "
+                    "(expected 1) — check panel pacing for a regression.",
+                    len(pending),
                 )
+            item = pending[-1]
+            pairs.append(
+                {
+                    "interviewer": item["interviewer"],
+                    "question": item["question"],
+                    "candidate_answer": content,
+                }
+            )
             pending = []
 
     return pairs

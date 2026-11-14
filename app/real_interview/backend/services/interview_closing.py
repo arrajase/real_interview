@@ -95,6 +95,33 @@ _NO_QUESTION_PATTERNS = (
 )
 
 
+_CLARIFY_PATTERNS = (
+    r"\b(re-?phrase|re-?frame|re-?word|repeat|restate)\b",
+    r"\bsay (that|it) again\b",
+    r"\bcome again\b",
+    r"\bpardon\b",
+    r"\bwhat do you mean\b",
+    r"\bwhat (exactly )?are you asking\b",
+    r"\b(did ?n'?t|do ?n'?t|did not|do not) (understand|get|follow)\b",
+    r"\bnot sure what you(\'re| are) asking\b",
+    r"\b(clarify|explain) (the|your|that) question\b",
+    r"\bcan you clarify\b",
+)
+
+# Clarification requests are short; longer messages that merely contain "clarify"
+# or "repeat" are treated as real answers.
+_CLARIFY_MAX_WORDS = 20
+
+
+def candidate_requested_clarification(text: str) -> bool:
+    """True when the candidate asks the interviewer to repeat/rephrase/clarify the last question."""
+    raw = (text or "").strip()
+    if not raw or len(raw.split()) > _CLARIFY_MAX_WORDS:
+        return False
+    lowered = raw.lower()
+    return any(re.search(pattern, lowered) for pattern in _CLARIFY_PATTERNS)
+
+
 def candidate_declined_questions(text: str) -> bool:
     """True when the candidate indicates they have no questions for the panel."""
     raw = (text or "").strip()
