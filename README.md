@@ -46,7 +46,8 @@ app/real_interview/
 │   ├── config/                 # Loads params.yaml for interview tuning
 │   ├── llm/                    # OpenAI client wrapper
 │   └── utils/                  # MongoDB connection, log sanitization
-├── frontend/                   # Static UI (index.html, admin.html, feedback.html, *.js)
+├── frontend/                   # Static UI (index.html, admin.html, feedback.html, *.js);
+│                               #   styles.css = light "Slate" theme, Inter font via Google Fonts
 └── data/                       # Reserved data paths (config, transcripts, etc.)
 
 app/trap_drills/                # Sibling app — see Interview Trap Drills section below
@@ -77,8 +78,9 @@ params.yaml                     # Interview limits, summarizer/feedback threshol
 
 ### Features
 - Resume upload (PDF, DOC, or DOCX) with download of saved files from the user profile.
-- Job description input parsing.
-- Chat interview simulation with configurable questions-per-interviewer (app default + per-user override).
+- Job description input parsing — paste a link, paste the text, or pick a posting from **LinkedIn job search**.
+- **LinkedIn job search** — find recent LinkedIn postings for the candidate's role and start interview prep from any of them in one click (see [LinkedIn job search](#linkedin-job-search)).
+- Chat interview simulation with configurable questions-per-interviewer (app default + per-user override); the panel asks one question at a time.
 - Post-interview report (structured feedback + PDF download).
 - **Candidate Avatar** — ideal interview answers grounded in the resume (report + live **Discuss with Avatar** chat).
 - **Practice: Be the Interviewer** — role-reversed practice mode: you interview your own Candidate Avatar and get a structured report evaluating it, same format as a real interview report.
@@ -174,7 +176,8 @@ Copy from `.env_copy` and set these on your host (never commit real `.env`):
 |----------|----------|-------|
 | `MONGODB_URI` | Yes | Same Atlas cluster as local dev |
 | `OPENAI_API_KEY` | Yes | |
-| `TAVILY_API_KEY` | Yes | Interviewer + Candidate Avatar web search |
+| `TAVILY_API_KEY` | Yes | Interviewer + Candidate Avatar web search, and LinkedIn job search |
+| `LINKEDIN_JOB_SEARCH_MAX_RESULTS` | Optional | Rows requested per LinkedIn search (default and maximum `20`). Lowering it does not save credits — a search costs 1 credit regardless |
 | `JWT_SECRET_KEY` | Yes | Local: generate with `secrets.token_hex(32)`. Render: auto-generated via `generateValue: true` in `render.yaml` |
 | `ADMIN_EMAILS` | Yes (admin) | Comma-separated signup emails allowed to open `/admin` |
 | `FEEDBACK_TO_EMAIL` | Yes (feedback) | Inbox for `/feedback` submissions; defaults to first `ADMIN_EMAILS` if unset |
@@ -243,12 +246,15 @@ Copy `MONGODB_URI` from your local `.env` exactly (no leading/trailing spaces).
 
 1. Sign up / log in — you should land on **Your profile** (cookie auth persists).
 2. On the profile, set **Interview settings** (optional) and upload a resume; confirm **Download saved resume** works.
-3. Click **Start interview** → upload/select resume → save job application → start chat; confirm HR summary and `[I1]` opening message.
-4. Pause and resume — summary should carry over.
-5. End interview — interview report appears with **Download PDF**; completed row on profile shows a download icon for the report.
-6. Profile → **Discuss with Avatar** — ask a practice question; confirm the avatar replies using resume context.
-7. Profile → **Practice: Be the Interviewer** — pick a resume, start a session, ask a question, then **End session**; confirm the report renders and **Download PDF** works.
-8. Open **Send feedback** (footer link or `/feedback`) — confirm the message arrives in your inbox.
+3. Click **Start interview** → upload/select resume → save job application → start chat; confirm HR summary and the opening (with a 2-person panel: `[I2]` introduces themselves, then `[I1]` asks the single opening question).
+4. Repeat step 3 but use **Find on LinkedIn**: search a role, confirm the results table, then **Start interview prep** on a row. Render logs should show `[linkedin_job_search] N postings from N results {...}`; "LinkedIn job search is not configured" means `TAVILY_API_KEY` is missing or quoted.
+5. Pause and resume — summary should carry over.
+6. End interview — interview report appears with **Download PDF**; completed row on profile shows a download icon for the report.
+7. Profile → **Discuss with Avatar** — ask a practice question; confirm the avatar replies using resume context.
+8. Profile → **Practice: Be the Interviewer** — pick a resume, start a session, ask a question, then **End session**; confirm the report renders and **Download PDF** works.
+9. Open **Send feedback** (footer link or `/feedback`) — confirm the message arrives in your inbox.
+
+After a deploy that changes `app.js`, `index.html`, or `styles.css`, hard-refresh (**Ctrl+F5**) so the browser does not keep the cached files.
 
 ### Open the UI
 
@@ -264,8 +270,8 @@ Use port **5000** unless you set `PORT` to something else in `.env`.
 
 1. **Sign up** or **Log in** — opens **Your profile**
 2. **Interview settings** (optional) — question limit per panel member; toggle **ideal answers in reports** (on by default)
-3. **Start interview** — upload or select a resume, then save a job application
-4. **Live panel chat** — all panelists present from the start (`[I1]`, `[I2]`, …); follow-ups based on your answers
+3. **Start interview** — upload or select a resume, then provide the job: **Job link**, **Job description** (paste), or **Find on LinkedIn** (search recent postings and click **Start interview prep** on one)
+4. **Live panel chat** — all panelists present from the start (`[I1]`, `[I2]`, …); one question per turn, follow-ups based on your answers. Ask "can you rephrase the question?" any time — the same interviewer restates it
 5. **Pause interview** — conversation is summarized and saved; resume later from profile or upload flow
 6. **Resume interview** — continue the same session (profile **Resume interview** picks the latest paused session)
 7. **End interview** when ready — structured **interview report** with PDF download; **Back to profile** returns to your dashboard
@@ -274,6 +280,57 @@ Use port **5000** unless you set `PORT` to something else in `.env`.
 10. **Practice: Be the Interviewer** — pick a resume (optionally target a role), then interview your own Candidate Avatar; pause/resume/end like a real interview, and get a structured report evaluating the avatar's performance
 11. **Send feedback** (footer link) — report bugs or ideas about the site itself
 12. **Sign out** clears the browser session
+
+---
+
+## LinkedIn job search
+
+On the **Job application** screen, the **Find on LinkedIn** tab finds recent LinkedIn postings for a role so the candidate can practice against a real job ad instead of pasting one.
+
+### How it works
+
+1. The **Job role** box is pre-filled with the most recent job title on the selected resume; **Location** is optional (results lean US-based without one).
+2. **Search LinkedIn** runs one [Tavily](https://tavily.com) search limited to LinkedIn single-posting pages (`linkedin.com/jobs/view/...`) from the last 30 days. Listing pages ("10,000+ open roles") are dropped, and duplicates are merged.
+3. The table shows up to **20 postings**: role (links to the ad), company, location, and **Start interview prep**.
+4. **Start interview prep** saves the posting as a normal job application and runs the usual interview start — HR summary, panel, question bank, and reports all work as for any other job.
+
+The same search call returns each page's text, so the job description arrives with the results. The browser sends it back on **Start interview prep**, so prep needs no second Tavily call.
+
+### Posting status
+
+| Label | Meaning | Job description used for prep |
+|-------|---------|-------------------------------|
+| *(none)* | Live posting | The real ad text |
+| **Closed** | Live, but no longer accepting applications | The real ad text (fine for practice) |
+| **Expired** | LinkedIn now redirects the posting to a search page; the ad is gone | **Approximated** from the role title, company and location. The description starts with a note saying so, and the interview screen shows the same note |
+| *(none, rare)* | Tavily returned no page text | Fetched once on click; falls back to the approximated description if the ad is gone |
+
+Expired postings are kept on purpose: a matching role is still good practice. The approximated description covers what the role typically involves and does not state company specifics (products, stack, pay) as fact.
+
+### Cost (Tavily credits)
+
+| Action | Credits |
+|--------|---------|
+| One search | 1 (independent of how many rows come back) |
+| Start interview prep — live / closed / expired posting | 0 |
+| Start interview prep — posting with no page text (rare) | ~1 |
+
+### API (JWT required)
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/job-search/linkedin?role=…&location=…` | Search. Returns `{role, location, jobs: [{job_id, url, title, company, location, status, closed, description}]}`; `status` is `live`, `expired`, or `unknown`. Role max 120 chars, location max 80 |
+| `POST /api/job-applications` with `input_mode: "linkedin"` | Save a posting. Body: `application_link` (must be a `linkedin.com/jobs/view/...` URL), plus `job_description_text`, `posting_status`, `job_title`, `company`, `location` from the search result |
+
+Errors: `400` invalid role or URL, `422` posting unreadable with nothing to approximate from (paste the description instead), `502` search failed, `503` Tavily not configured.
+
+### Data model
+
+Job applications (`job_application` collection) now record `description_source`: `link`, `description`, `linkedin` (real ad text), or `linkedin_approximate` (expired posting). Older documents without the field are unaffected.
+
+Code: `backend/services/linkedin_job_search.py` (search, status, page cleanup), `services/job_application.py` (`linkedin` input mode), `agents/job_application_agent.py` (`approximate_from_role`).
+
+**Terms of use:** this reads public LinkedIn job pages through Tavily. Review LinkedIn's terms before offering the feature commercially.
 
 ---
 
@@ -727,7 +784,21 @@ The example below is **illustrative** — actual questions and tone depend on yo
 
 ### Live panel chat (excerpt)
 
-All panelists are in the room from the start. After each answer, a **panel coordinator** picks who should follow up (often 1–2 interviewers per turn). Questions are grounded in what you just said — no manual handoff between interviewers.
+All panelists are in the room from the start. After each answer, a **panel coordinator** picks **one** interviewer to follow up, so you never face two unanswered questions at once. Questions are grounded in what you just said — no manual handoff between interviewers.
+
+**Opening:** with a 2-person panel, `[I2]` briefly introduces themselves first (no question), then the lead `[I1]` welcomes you and asks the only opening question — so the last thing on screen is the question. The intro does not count toward `[I2]`'s question limit.
+
+**Asking for clarification:** reply with something like *"can you rephrase the question?"*, *"could you repeat that?"*, or *"I didn't understand the question"* (short messages, up to 20 words). The interviewer who asked restates the same question more simply instead of moving on. The rephrase does not count as a new question, still happens after the last allowed question, and the report pairs your answer with the rephrased question.
+
+**Interviewer styles:** the three styles differ in *technique and delivery*, not in how strict they are:
+
+| Style | How it interviews |
+|-------|-------------------|
+| `positive` | Encouraging without lowering the bar; anchors on resume specifics, goes deeper on strong answers, gives one narrower retry on vague ones |
+| `negative` | Rigorous and skeptical but not hostile; pushes for metrics, alternatives, and what broke; calls out vague or rehearsed answers |
+| `objective` | Structured; covers technical depth, problem-solving process, communication, and ownership, prioritizing breadth when the question budget is tight |
+
+Question difficulty is calibrated to the router's `experience_level` (junior / mid / senior). Interviewers never tell you during the interview whether you would be selected — the decision appears only in the interview report.
 
 **Session limits** (app defaults in `params.yaml` → `interview.limits`; candidates may override question count on their profile — see [User profile](#user-profile)):
 
@@ -822,4 +893,6 @@ See [Candidate Avatar](#candidate-avatar) for the full JSON shape, **Discuss wit
 
 ## Dependencies
 
-See `requirements.txt`: Flask, PyMongo, bcrypt, pypdf, python-docx, legacy-doc, python-dotenv, PyYAML, langchain-openai, langgraph, langchain-core, tavily-python, fpdf2 (interview report PDFs).
+See `requirements.txt`: Flask, PyMongo, bcrypt, pypdf, python-docx, legacy-doc, python-dotenv, PyYAML, langchain-openai, langgraph, langchain-core, tavily-python (**>= 0.7.0** — LinkedIn job search uses `include_raw_content` and `time_range`), fpdf2 (interview report PDFs).
+
+The UI loads the **Inter** font from Google Fonts; if it is blocked or offline, pages fall back to the system font.

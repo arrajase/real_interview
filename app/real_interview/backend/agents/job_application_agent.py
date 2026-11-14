@@ -81,3 +81,57 @@ class JobApplicationAgent:
         except Exception:
             logger.exception("[JobApplicationAgent] LLM extraction failed")
             return {"job_role": "", "job_description": snippet[:8000]}
+
+    def approximate_from_role(
+        self,
+        *,
+        job_title: str,
+        company: str = "",
+        location: str = "",
+    ) -> Dict[str, str]:
+        """
+        Draft a typical job description for interview practice when the real posting has
+        expired. Only the title/company/location are known, so this describes the role in
+        general terms and must not present invented company specifics as fact.
+        """
+        logger.info("[JobApplicationAgent] approximate_from_role title=%r", job_title)
+        title = (job_title or "").strip()
+        fallback = "\n".join(
+            line
+            for line in (
+                f"Role: {title}",
+                f"Company: {company.strip()}" if company and company.strip() else "",
+                f"Location: {location.strip()}" if location and location.strip() else "",
+            )
+            if line
+        )
+        if not title:
+            return {"job_role": "", "job_description": ""}
+
+        llm = self._llm_wrapper.get_llm_model()
+        structured = llm.with_structured_output(JobApplicationExtractionModel)
+        system = SystemMessage(
+            content=(
+                "The original job posting has expired; only its title, company and location are known. "
+                "Write a realistic, typical job description for this role to be used for interview practice. "
+                "Set job_role to the title as given. Set job_description using labeled sections "
+                "(Role, Company, Location, Responsibilities, Requirements, Nice-to-have). "
+                "Base responsibilities and requirements on what this title and its seniority usually "
+                "involve across the industry. Name the company only as the employer: do not state "
+                "specific facts about it (products, teams, tech stack, benefits, compensation) as if "
+                "they came from the posting. Plain text."
+            )
+        )
+        user = HumanMessage(
+            content=f"Title: {title}\nCompany: {company or 'unknown'}\nLocation: {location or 'unknown'}"
+        )
+        try:
+            parsed: JobApplicationExtractionModel = structured.invoke([system, user])
+            data = parsed.model_dump()
+            return {
+                "job_role": (data.get("job_role") or title).strip(),
+                "job_description": (data.get("job_description") or fallback).strip(),
+            }
+        except Exception:
+            logger.exception("[JobApplicationAgent] approximate_from_role failed")
+            return {"job_role": title, "job_description": fallback}

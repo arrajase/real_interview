@@ -13,16 +13,39 @@ from pymongo.errors import CollectionInvalid, PyMongoError
 
 from app.real_interview import logger
 from app.real_interview.backend.agents.job_application_agent import JobApplicationAgent
+from app.real_interview.backend.services.linkedin_job_search import (
+    MAX_DESCRIPTION_CHARS,
+    MAX_LOCATION_CHARS,
+    MAX_ROLE_CHARS,
+    STATUS_EXPIRED,
+    LinkedInJobFetchError,
+    fetch_linkedin_job_text,
+    is_linkedin_job_url,
+)
 from app.real_interview.backend.utils.mongodb import get_mongodb_database
 
 APPLICATION_LINK_NA = "NA"
 INPUT_MODE_LINK = "link"
 INPUT_MODE_DESCRIPTION = "description"
+INPUT_MODE_LINKEDIN = "linkedin"
 ERROR_CODE_JOB_URL_BLOCKED = "job_url_blocked"
 
 JOB_URL_BLOCKED_MESSAGE = (
     "This job board blocked automated access to that link. "
     "Switch to Job description, paste the full job posting text, and submit again."
+)
+
+LINKEDIN_FETCH_FAILED_MESSAGE = (
+    "Could not read that LinkedIn posting (it may have been removed). Open it, copy the job "
+    "description, paste it under Job description, and submit again."
+)
+
+# description_source values for LinkedIn job applications.
+LINKEDIN_SOURCE_POSTING = "linkedin"
+LINKEDIN_SOURCE_APPROXIMATE = "linkedin_approximate"
+APPROXIMATE_DESCRIPTION_NOTE = (
+    "Note: the original LinkedIn posting has expired. This description is approximated from "
+    "the role title, company and location for interview practice; it is not the employer's ad."
 )
 
 _BLOCKED_HTTP_STATUS = frozenset({401, 403, 429, 451, 503})
@@ -205,12 +228,20 @@ def submit_job_application(
     input_mode: str,
     application_link: Optional[str] = None,
     job_description_text: Optional[str] = None,
+    job_title: Optional[str] = None,
+    company: Optional[str] = None,
+    job_location: Optional[str] = None,
+    posting_status: Optional[str] = None,
     parse_agent: Optional[JobApplicationAgent] = None,
 ) -> Dict[str, Any]:
     """
     Persist a job application record for a customer.
 
-    input_mode: ``link`` (fetch URL) or ``description`` (user-provided text).
+    input_mode: ``link`` (fetch URL), ``description`` (user-provided text), or
+    ``linkedin`` (a posting picked from LinkedIn job search). For ``linkedin`` the
+    browser sends back the ad text the search already returned, so no further Tavily
+    call is needed; expired postings (``posting_status="expired"``) get an approximate
+    description built from job_title/company/job_location.
     """
     logger.info("[job_application] submit_job_application start mode=%s", input_mode)
     agent = parse_agent if parse_agent is not None else JobApplicationAgent()
@@ -222,8 +253,8 @@ def submit_job_application(
             return _error(400, str(exc))
 
         mode = (input_mode or "").strip().lower()
-        if mode not in (INPUT_MODE_LINK, INPUT_MODE_DESCRIPTION):
-            return _error(400, "input_mode must be 'link' or 'description'")
+        if mode not in (INPUT_MODE_LINK, INPUT_MODE_DESCRIPTION, INPUT_MODE_LINKEDIN):
+            return _error(400, "input_mode must be 'link', 'description', or 'linkedin'")
 
         users_coll, job_coll = _get_collections()
         if not _customer_exists(users_coll, customer_oid):
@@ -231,6 +262,7 @@ def submit_job_application(
 
         stored_link = APPLICATION_LINK_NA
         source_text = ""
+        description_source = mode
 
         if mode == INPUT_MODE_LINK:
             link = (application_link or "").strip()
@@ -261,6 +293,54 @@ def submit_job_application(
                 source="link",
                 application_link=link,
             )
+        elif mode == INPUT_MODE_LINKEDIN:
+            link = (application_link or "").strip()
+            if not is_linkedin_job_url(link):
+                return _error(400, "application_link must be a LinkedIn job posting URL (linkedin.com/jobs/view/...)")
+            stored_link = link
+            title = (job_title or "").strip()[:MAX_ROLE_CHARS]
+            provided = (job_description_text or "").strip()[:MAX_DESCRIPTION_CHARS]
+            expired = (posting_status or "").strip().lower() == STATUS_EXPIRED
+
+            if provided:
+                # Ad text returned by the search: no further Tavily call (0 credits).
+                source_text = provided
+            elif not expired:
+                # Search returned no page text for this posting: fetch it once (~1 credit).
+                try:
+                    source_text = fetch_linkedin_job_text(link)
+                except (ValueError, RuntimeError) as exc:
+                    # Missing TAVILY_API_KEY / tavily not installed: a server config problem.
+                    logger.error("[job_application] LinkedIn fetch unavailable: %s", exc)
+                    return _error(503, "LinkedIn job search is not configured on this server.")
+                except LinkedInJobFetchError as exc:
+                    logger.info("[job_application] LinkedIn posting unreadable %s: %s", link, exc)
+                    expired = True
+
+            if source_text:
+                description_source = LINKEDIN_SOURCE_POSTING
+                extracted = agent.extract_from_text(
+                    source_text,
+                    source="linkedin",
+                    application_link=link,
+                )
+            else:
+                if not title:
+                    return _error(
+                        422,
+                        LINKEDIN_FETCH_FAILED_MESSAGE,
+                        error_code=ERROR_CODE_JOB_URL_BLOCKED,
+                        suggest_input_mode=INPUT_MODE_DESCRIPTION,
+                    )
+                description_source = LINKEDIN_SOURCE_APPROXIMATE
+                extracted = agent.approximate_from_role(
+                    job_title=title,
+                    company=(company or "").strip()[:MAX_ROLE_CHARS],
+                    location=(job_location or "").strip()[:MAX_LOCATION_CHARS],
+                )
+                extracted["job_description"] = (
+                    APPROXIMATE_DESCRIPTION_NOTE + "\n\n" + (extracted.get("job_description") or "")
+                ).strip()
         else:
             text = (job_description_text or "").strip()
             if not text:
@@ -279,6 +359,7 @@ def submit_job_application(
             "job_role": job_role,
             "application_link": stored_link,
             "job_description": job_description,
+            "description_source": description_source,
             "job_application_ts": job_application_ts,
         }
         result = job_coll.insert_one(doc)
@@ -289,6 +370,7 @@ def submit_job_application(
             "job_role": job_role,
             "application_link": stored_link,
             "job_description": job_description,
+            "description_source": description_source,
             "job_application_ts": job_application_ts.isoformat(),
             "message": "job application saved successfully",
         }

@@ -366,8 +366,8 @@
           </button>
         </div>
         <p class="hint">
-          Provide a job posting link or paste the job description. We will extract the role and store an
-          agent-readable summary.
+          Provide a job posting link, paste the job description, or find open roles on LinkedIn. We will
+          extract the role and store an agent-readable summary.
         </p>
 
         <div class="tabs job-input-tabs" role="tablist" aria-label="Job input mode">
@@ -389,6 +389,53 @@
           >
             Job description
           </button>
+          <button
+            type="button"
+            class="tab job-mode-tab"
+            data-job-mode="linkedin"
+            role="tab"
+            aria-selected="false"
+          >
+            Find on LinkedIn
+          </button>
+        </div>
+
+        <div id="panel-job-linkedin" class="tab-panel is-hidden" role="tabpanel" hidden>
+          <form id="form-linkedin-search" class="stack" novalidate>
+            <label>
+              Job role
+              <input
+                type="text"
+                name="role"
+                maxlength="120"
+                placeholder="e.g. Backend Engineer"
+                autocomplete="off"
+              />
+            </label>
+            <label>
+              Location <span class="optional">(optional)</span>
+              <input type="text" name="location" maxlength="80" placeholder="e.g. Seattle, WA or Remote" />
+            </label>
+            <button type="submit" class="btn primary">Search LinkedIn</button>
+          </form>
+          <p class="hint linkedin-results-hint">
+            Shows LinkedIn postings from the last 30 days. Starting prep uses the job description from the
+            posting and starts the interview with your selected resume. Expired postings are kept for
+            practice; their description is approximated from the role title, company and location.
+          </p>
+          <div id="linkedin-results-wrap" class="table-wrap is-hidden" hidden aria-live="polite">
+            <table class="data-table linkedin-results-table">
+              <thead>
+                <tr>
+                  <th scope="col">Role</th>
+                  <th scope="col">Company</th>
+                  <th scope="col">Location</th>
+                  <th scope="col"><span class="sr-only">Action</span></th>
+                </tr>
+              </thead>
+              <tbody id="linkedin-results-body"></tbody>
+            </table>
+          </div>
         </div>
 
         <form id="form-job-application" class="stack" novalidate>

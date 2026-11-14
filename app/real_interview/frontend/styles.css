@@ -1088,3 +1088,28 @@ label.confirm-delete input {
   font-weight: 600;
   white-space: nowrap;
 }
+
+/* ---------- LinkedIn job search ---------- */
+
+.linkedin-results-hint {
+  margin-top: 0.85rem;
+}
+
+.linkedin-results-table td {
+  vertical-align: middle;
+}
+
+.linkedin-results-table .linkedin-role-link {
+  font-weight: 600;
+}
+
+.linkedin-results-table .linkedin-action-cell {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.linkedin-results-table .btn {
+  padding: 0.45rem 0.8rem;
+  font-size: 0.82rem;
+}
+

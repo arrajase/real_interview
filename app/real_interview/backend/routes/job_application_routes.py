@@ -5,6 +5,11 @@ from flask import Blueprint, g, jsonify, request
 from app.real_interview import logger
 from app.real_interview.backend.auth.jwt_auth import require_auth
 from app.real_interview.backend.services.job_application import submit_job_application
+from app.real_interview.backend.services.linkedin_job_search import (
+    MAX_LOCATION_CHARS,
+    MAX_ROLE_CHARS,
+    search_linkedin_jobs,
+)
 
 job_application_blueprint = Blueprint("job_application", __name__, url_prefix="/api")
 
@@ -14,6 +19,10 @@ def _parse_json_body() -> Dict[str, Any] | None:
     if data is None or not isinstance(data, dict):
         return None
     return data
+
+
+def _optional_str(value: Any) -> str | None:
+    return value if isinstance(value, str) else None
 
 
 def _service_result_to_response(result: Dict[str, Any]):
@@ -50,9 +59,35 @@ def submit_job_application_route():
         job_description_text=(
             job_description_text if isinstance(job_description_text, str) else None
         ),
+        # LinkedIn search picks only (ignored by the other input modes).
+        job_title=_optional_str(body.get("job_title")),
+        company=_optional_str(body.get("company")),
+        job_location=_optional_str(body.get("location")),
+        posting_status=_optional_str(body.get("posting_status")),
     )
     logger.info(
         "[job_application][POST /api/job-applications] finished status_code=%s",
         result.get("status_code"),
     )
     return _service_result_to_response(result)
+
+
+@job_application_blueprint.route("/job-search/linkedin", methods=["GET"])
+@require_auth
+def search_linkedin_jobs_route():
+    role = (request.args.get("role") or "").strip()
+    location = (request.args.get("location") or "").strip()
+    logger.info("[job_application][GET /api/job-search/linkedin] role=%r location=%r", role, location)
+    if not role:
+        return jsonify({"error": "role is required"}), 400
+    if len(role) > MAX_ROLE_CHARS or len(location) > MAX_LOCATION_CHARS:
+        return jsonify({"error": "role or location is too long"}), 400
+    try:
+        jobs = search_linkedin_jobs(role, location)
+    except (ValueError, RuntimeError) as exc:
+        logger.error("[job_application] LinkedIn search unavailable: %s", exc)
+        return jsonify({"error": "LinkedIn job search is not configured on this server."}), 503
+    except Exception:
+        logger.exception("[job_application] LinkedIn search failed")
+        return jsonify({"error": "LinkedIn search failed. Try again in a moment."}), 502
+    return jsonify({"role": role, "location": location, "jobs": jobs}), 200

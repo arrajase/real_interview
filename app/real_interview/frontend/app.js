@@ -10,6 +10,9 @@
   var STORAGE_KEY_PRACTICE_SESSION = "ri_practice_session";
   var JOB_MODE_LINK = "link";
   var JOB_MODE_DESCRIPTION = "description";
+  var JOB_MODE_LINKEDIN = "linkedin";
+  var LINKEDIN_STATUS_EXPIRED = "expired";
+  var LINKEDIN_SOURCE_APPROXIMATE = "linkedin_approximate";
 
   function $(id) {
     return document.getElementById(id);
@@ -1207,9 +1210,12 @@
     var tabs = document.querySelectorAll(".job-mode-tab");
     var panelLink = $("panel-job-link");
     var panelDescription = $("panel-job-description");
+    var panelLinkedIn = $("panel-job-linkedin");
+    var jobForm = $("form-job-application");
     var linkInput = document.querySelector('#panel-job-link input[name="application_link"]');
     var descInput = document.querySelector('#panel-job-description textarea[name="job_description_text"]');
     var useDescription = mode === JOB_MODE_DESCRIPTION;
+    var useLinkedIn = mode === JOB_MODE_LINKEDIN;
 
     tabs.forEach(function (tab) {
       var tabMode = tab.getAttribute("data-job-mode");
@@ -1217,6 +1223,21 @@
       tab.classList.toggle("is-active", active);
       tab.setAttribute("aria-selected", active ? "true" : "false");
     });
+
+    // LinkedIn search has its own form and results table; the save-job form is hidden there.
+    if (panelLinkedIn) {
+      panelLinkedIn.classList.toggle("is-hidden", !useLinkedIn);
+      if (useLinkedIn) panelLinkedIn.removeAttribute("hidden");
+      else panelLinkedIn.setAttribute("hidden", "");
+    }
+    // .stack sets display:flex, so a bare [hidden] would not hide the form.
+    showElement(jobForm, !useLinkedIn);
+    if (useLinkedIn) {
+      if (linkInput) linkInput.removeAttribute("required");
+      if (descInput) descInput.removeAttribute("required");
+      prefillLinkedInRole();
+      return;
+    }
 
     if (useDescription) {
       panelLink.classList.add("is-hidden");
@@ -1233,6 +1254,213 @@
       if (descInput) descInput.removeAttribute("required");
       if (linkInput) linkInput.setAttribute("required", "");
     }
+  }
+
+  function getStoredResumeParsed() {
+    try {
+      var raw = sessionStorage.getItem(STORAGE_KEY_RESUME_PARSED);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /** Pre-fill the LinkedIn role box with the candidate's most recent job title. */
+  function prefillLinkedInRole() {
+    var input = document.querySelector('#form-linkedin-search input[name="role"]');
+    if (!input || input.value.trim()) return;
+    var parsed = getStoredResumeParsed();
+    var experience = parsed && Array.isArray(parsed.experience) ? parsed.experience : [];
+    for (var i = 0; i < experience.length; i++) {
+      var title = experience[i] && experience[i].title ? String(experience[i].title).trim() : "";
+      if (title) {
+        input.value = title;
+        return;
+      }
+    }
+  }
+
+  function setLinkedInButtonsDisabled(disabled) {
+    var buttons = document.querySelectorAll("#panel-job-linkedin button");
+    buttons.forEach(function (b) {
+      b.disabled = disabled;
+    });
+  }
+
+  function renderLinkedInJobs(jobs) {
+    var wrap = $("linkedin-results-wrap");
+    var tbody = $("linkedin-results-body");
+    if (!tbody) return;
+    tbody.textContent = "";
+
+    jobs.forEach(function (job) {
+      var tr = document.createElement("tr");
+
+      var tdRole = document.createElement("td");
+      var link = document.createElement("a");
+      link.href = job.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.className = "linkedin-role-link";
+      link.textContent = job.title || "Untitled role";
+      link.title = "Open the posting on LinkedIn";
+      tdRole.appendChild(link);
+      var pillText = "";
+      var pillTitle = "";
+      if (job.status === LINKEDIN_STATUS_EXPIRED) {
+        pillText = "Expired";
+        pillTitle =
+          "This posting has expired. Prep uses a description approximated from the role title, company and location.";
+      } else if (job.closed) {
+        pillText = "Closed";
+        pillTitle = "No longer accepting applications — the description is still fine for prep.";
+      }
+      if (pillText) {
+        var pill = document.createElement("span");
+        pill.className = "status-pill status-paused linkedin-status-pill";
+        pill.textContent = pillText;
+        pill.title = pillTitle;
+        tdRole.appendChild(document.createTextNode(" "));
+        tdRole.appendChild(pill);
+      }
+
+      var tdCompany = document.createElement("td");
+      tdCompany.textContent = job.company || "\u2014";
+
+      var tdLocation = document.createElement("td");
+      tdLocation.textContent = job.location || "\u2014";
+
+      var tdAction = document.createElement("td");
+      tdAction.className = "linkedin-action-cell";
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn primary";
+      btn.textContent = "Start interview prep";
+      btn.addEventListener("click", function () {
+        startLinkedInInterviewPrep(job);
+      });
+      tdAction.appendChild(btn);
+
+      tr.appendChild(tdRole);
+      tr.appendChild(tdCompany);
+      tr.appendChild(tdLocation);
+      tr.appendChild(tdAction);
+      tbody.appendChild(tr);
+    });
+
+    showElement(wrap, jobs.length > 0);
+  }
+
+  /** Save the LinkedIn posting as a job application, then run the normal interview start. */
+  function startLinkedInInterviewPrep(job) {
+    var msg = $("job-message");
+    clearMessage(msg);
+    if (!isSignedIn()) {
+      setMessage(msg, "Session missing. Please sign in again.", "error");
+      handleUnauthorized();
+      return;
+    }
+    if (!getStoredResumeId()) {
+      setMessage(msg, "Select a resume first, then come back to start interview prep.", "error");
+      return;
+    }
+
+    setLinkedInButtonsDisabled(true);
+    setMessage(
+      msg,
+      job.status === LINKEDIN_STATUS_EXPIRED
+        ? "Preparing a practice description for this role\u2026"
+        : "Preparing the job description from the LinkedIn posting\u2026",
+      "ok"
+    );
+    // Send back the ad text the search already returned, so the server needs no further
+    // Tavily call. Title/company/location are used only if the posting has expired.
+    apiJson("/api/job-applications", {
+      input_mode: JOB_MODE_LINKEDIN,
+      application_link: job.url,
+      job_description_text: job.description || "",
+      posting_status: job.status || "",
+      job_title: job.title || "",
+      company: job.company || "",
+      location: job.location || "",
+    })
+      .then(function (r) {
+        if (r.ok && r.data.job_application_id) {
+          setStoredJobApplicationId(r.data.job_application_id);
+          var approximate = r.data.description_source === LINKEDIN_SOURCE_APPROXIMATE;
+          return startInterviewSession().then(function () {
+            if (approximate && getStoredInterviewSession()) {
+              setMessage(
+                $("chat-message"),
+                "The original posting has expired, so this interview uses a description approximated " +
+                  "from the role title, company and location.",
+                "ok"
+              );
+            }
+          });
+        }
+        setMessage(msg, (r.data && r.data.error) || "Could not read that LinkedIn posting.", "error");
+      })
+      .catch(function () {
+        setMessage(msg, "Network error. Try again.", "error");
+      })
+      .finally(function () {
+        setLinkedInButtonsDisabled(false);
+      });
+  }
+
+  function wireLinkedInSearch() {
+    var form = $("form-linkedin-search");
+    if (!form) return;
+    form.addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var msg = $("job-message");
+      clearMessage(msg);
+      if (!isSignedIn()) {
+        setMessage(msg, "Session missing. Please sign in again.", "error");
+        handleUnauthorized();
+        return;
+      }
+      var fd = new FormData(form);
+      var role = (fd.get("role") || "").toString().trim();
+      var location = (fd.get("location") || "").toString().trim();
+      if (!role) {
+        setMessage(msg, "Enter a job role to search for.", "error");
+        return;
+      }
+
+      var url = "/api/job-search/linkedin?role=" + encodeURIComponent(role);
+      if (location) url += "&location=" + encodeURIComponent(location);
+
+      setLinkedInButtonsDisabled(true);
+      setMessage(msg, "Searching LinkedIn\u2026", "ok");
+      apiGet(url)
+        .then(function (r) {
+          if (!r.ok) {
+            renderLinkedInJobs([]);
+            setMessage(msg, (r.data && r.data.error) || "LinkedIn search failed.", "error");
+            return;
+          }
+          var jobs = (r.data && r.data.jobs) || [];
+          renderLinkedInJobs(jobs);
+          if (jobs.length) {
+            var expiredCount = jobs.filter(function (j) {
+              return j.status === LINKEDIN_STATUS_EXPIRED;
+            }).length;
+            var summary = "Found " + jobs.length + " recent posting" + (jobs.length === 1 ? "" : "s");
+            if (expiredCount) summary += " (" + expiredCount + " expired, still usable for practice)";
+            setMessage(msg, summary + ".", "ok");
+          } else {
+            setMessage(msg, "No recent LinkedIn postings found. Try a broader role or remove the location.", "error");
+          }
+        })
+        .catch(function () {
+          setMessage(msg, "Network error. Try again.", "error");
+        })
+        .finally(function () {
+          setLinkedInButtonsDisabled(false);
+        });
+    });
   }
 
   function initJobInputTabs() {
@@ -2905,6 +3133,11 @@
       showElement($("resume-selected-wrap"), false);
       showElement($("btn-continue-job"), false);
       showElement($("btn-start-interview"), false);
+      showElement($("linkedin-results-wrap"), false);
+      var linkedinBody = $("linkedin-results-body");
+      if (linkedinBody) linkedinBody.textContent = "";
+      var linkedinForm = $("form-linkedin-search");
+      if (linkedinForm) linkedinForm.reset();
       showElement($("interview-feedback-wrap"), false);
       showElement($("btn-back-profile-after-interview"), false);
       showElement($("btn-download-interview-report"), false);
@@ -2967,6 +3200,7 @@
     wireFetchResume();
     wireContinueToJob();
     wireJobApplication();
+    wireLinkedInSearch();
     wireStartInterview();
     wireInterviewChat();
     wireInterviewerPracticeSetup();
